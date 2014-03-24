@@ -135,7 +135,37 @@ drawNeighborhood : Coord -> Coord -> Coord -> [Form]
 drawNeighborhood x y z = concatMap (drawRoomAt x y z) allOffsets
 
 drawView : GameState -> Element
-drawView {x, y, z} = collage 650 650 (drawNeighborhood x y z) |> color black
+drawView {x, y, z} = (collage 632 632 (drawNeighborhood x y z) |> color black)
+  `beside` container 200 632 midTop [markdown|
+![](stairs.png) Stairway up
+
+![](stairsBoth.png) Stairway up and down
+
+![](stairsDown.png) Stairway down
+
+![](elevator.png) Elevator
+
+![](pit.png) Pit
+
+![](teleport.png) Teleportal
+
+![](altar.png) Altar
+
+![](fountain.png) Fountain
+
+![](throne.png) Gem encrusted throne
+
+![](grayMistyCube.png) Gray misty cube
+
+![](box.png) Small box with buttons
+
+----
+
+*Arrow Keys*: Pan the map
+
+*U, D*: Go up or down a level
+
+|] |> color charcoal
 
 bound : Int -> Int
 bound x = clamp 1 200 x
@@ -163,9 +193,6 @@ keyCodeCommand n = case n of
   85 -> UP
   _ -> ERROR
 
--- update : {x : Int, y : Int} -> GameState -> GameState
--- update o s = {s | x <- bound (s.x + o.x), y <- bound (s.y - o.y)}
-
 initState = {x = 25, y = 13, z = 1}
 
 commandStream : Signal Command
@@ -176,6 +203,3 @@ stateSignal = foldp update initState commandStream
 
 main : Signal Element
 main = drawView <~ stateSignal
-
---main = asText . show <~ Keyboard.lastPressed
-
