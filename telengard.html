@@ -1,0 +1,507 @@
+<!DOCTYPE HTML>
+<html><head><meta charset="UTF-8"><title>telengard</title><script type="text/javascript" src="elm-runtime.js"></script><script type="text/javascript">Elm.Main = Elm.Main || {};
+Elm.Main.make = function (_elm) {
+   "use strict";
+   _elm.Main = _elm.Main || {};
+   if (_elm.Main.values)
+   return _elm.Main.values;
+   var _N = Elm.Native,
+   _U = _N.Utils.make(_elm),
+   _L = _N.List.make(_elm),
+   _E = _N.Error.make(_elm),
+   _J = _N.JavaScript.make(_elm),
+   $moduleName = "Main";
+   var Basics = Elm.Basics.make(_elm);
+   var Color = Elm.Color.make(_elm);
+   var Graphics = Graphics || {};
+   Graphics.Collage = Elm.Graphics.Collage.make(_elm);
+   var Graphics = Graphics || {};
+   Graphics.Element = Elm.Graphics.Element.make(_elm);
+   var Keyboard = Elm.Keyboard.make(_elm);
+   var List = Elm.List.make(_elm);
+   var Maybe = Elm.Maybe.make(_elm);
+   var Native = Native || {};
+   Native.Ports = Elm.Native.Ports.make(_elm);
+   var Signal = Elm.Signal.make(_elm);
+   var String = Elm.String.make(_elm);
+   var Text = Elm.Text.make(_elm);
+   var Time = Elm.Time.make(_elm);
+   var _op = {};
+   var offsets = _L.range(-7,7);
+   var allOffsets = A2(List.concatMap,
+   function (y) {
+      return A2(List.map,
+      function (x) {
+         return {ctor: "_Tuple2"
+                ,_0: x
+                ,_1: y};
+      },
+      offsets);
+   },
+   offsets);
+   var vwall = Graphics.Collage.toForm(A3(Graphics.Element.image,
+   8,
+   56,
+   "vwall.png"));
+   var vdoor = Graphics.Collage.toForm(A3(Graphics.Element.image,
+   8,
+   56,
+   "vdoor.png"));
+   var hwall = Graphics.Collage.toForm(A3(Graphics.Element.image,
+   56,
+   8,
+   "hwall.png"));
+   var hdoor = Graphics.Collage.toForm(A3(Graphics.Element.image,
+   56,
+   8,
+   "hdoor.png"));
+   var box = Graphics.Collage.toForm(A3(Graphics.Element.image,
+   8,
+   8,
+   "box.png"));
+   var throne = Graphics.Collage.toForm(A3(Graphics.Element.image,
+   24,
+   21,
+   "throne.png"));
+   var cube = Graphics.Collage.toForm(A3(Graphics.Element.image,
+   8,
+   8,
+   "grayMistyCube.png"));
+   var fountain = Graphics.Collage.toForm(A3(Graphics.Element.image,
+   24,
+   21,
+   "fountain.png"));
+   var altar = Graphics.Collage.toForm(A3(Graphics.Element.image,
+   24,
+   21,
+   "altar.png"));
+   var teleport = Graphics.Collage.toForm(A3(Graphics.Element.image,
+   24,
+   21,
+   "teleport.png"));
+   var pit = Graphics.Collage.toForm(A3(Graphics.Element.image,
+   24,
+   21,
+   "pit.png"));
+   var elevator = Graphics.Collage.toForm(A3(Graphics.Element.image,
+   24,
+   21,
+   "elevator.png"));
+   var stairsBoth = Graphics.Collage.toForm(A3(Graphics.Element.image,
+   24,
+   21,
+   "stairsBoth.png"));
+   var stairsDown = Graphics.Collage.toForm(A3(Graphics.Element.image,
+   24,
+   21,
+   "stairsDown.png"));
+   var stairsUp = Graphics.Collage.toForm(A3(Graphics.Element.image,
+   24,
+   21,
+   "stairs.png"));
+   var mapFeature = F3(function (a,
+   b,
+   r) {
+      return _U.eq(r.feature,
+      a) ? _U.replace([["feature",b]],
+      r) : r;
+   });
+   var frac = function (r) {
+      return r - Basics.toFloat(Basics.floor(r));
+   };
+   var zo = 1.2462;
+   var yo = 1.4278;
+   var xo = 1.6915;
+   var inBounds = function (_v0) {
+      return function () {
+         return _U.cmp(_v0.x,
+         1) > -1 && (_U.cmp(_v0.x,
+         201) < 1 && (_U.cmp(_v0.y,
+         1) > -1 && (_U.cmp(_v0.y,
+         201) < 1 && (_U.cmp(_v0.z,
+         1) > -1 && _U.cmp(_v0.z,
+         50) < 1))));
+      }();
+   };
+   var onSoutheastCorner = function (_v2) {
+      return function () {
+         return _U.eq(_v2.x,
+         201) && _U.eq(_v2.y,201);
+      }();
+   };
+   var vbound = function (x) {
+      return A3(Basics.clamp,
+      1,
+      50,
+      x);
+   };
+   var bound = function (x) {
+      return A3(Basics.clamp,
+      1,
+      200,
+      x);
+   };
+   var initState = {_: {}
+                   ,x: 25
+                   ,y: 13
+                   ,z: 1};
+   var Position = F3(function (a,
+   b,
+   c) {
+      return {_: {}
+             ,x: a
+             ,y: b
+             ,z: c};
+   });
+   var Room = F3(function (a,b,c) {
+      return {_: {}
+             ,feature: c
+             ,left: b
+             ,top: a};
+   });
+   var DOWN = {ctor: "DOWN"};
+   var UP = {ctor: "UP"};
+   var WEST = {ctor: "WEST"};
+   var SOUTH = {ctor: "SOUTH"};
+   var EAST = {ctor: "EAST"};
+   var NORTH = {ctor: "NORTH"};
+   var ERROR = {ctor: "ERROR"};
+   var keyCodeCommand = function (n) {
+      return function () {
+         switch (n)
+         {case 37: return WEST;
+            case 38: return NORTH;
+            case 39: return EAST;
+            case 40: return SOUTH;
+            case 68: return DOWN;
+            case 85: return UP;}
+         return ERROR;
+      }();
+   };
+   var commandStream = A2(Signal._op["<~"],
+   keyCodeCommand,
+   Keyboard.lastPressed);
+   var update = F2(function (c,s) {
+      return function () {
+         switch (c.ctor)
+         {case "DOWN":
+            return _U.replace([["z"
+                               ,vbound(s.z + 1)]],
+              s);
+            case "EAST":
+            return _U.replace([["x"
+                               ,bound(s.x + 1)]],
+              s);
+            case "ERROR": return s;
+            case "NORTH":
+            return _U.replace([["y"
+                               ,bound(s.y - 1)]],
+              s);
+            case "SOUTH":
+            return _U.replace([["y"
+                               ,bound(s.y + 1)]],
+              s);
+            case "UP":
+            return _U.replace([["z"
+                               ,vbound(s.z - 1)]],
+              s);
+            case "WEST":
+            return _U.replace([["x"
+                               ,bound(s.x - 1)]],
+              s);}
+         _E.Case($moduleName,
+         "between lines 46 and 53");
+      }();
+   });
+   var stateSignal = A3(Signal.foldp,
+   update,
+   initState,
+   commandStream);
+   var BOX = {ctor: "BOX"};
+   var THRONE = {ctor: "THRONE"};
+   var CUBE = {ctor: "CUBE"};
+   var FOUNTAIN = {ctor: "FOUNTAIN"};
+   var ALTAR = {ctor: "ALTAR"};
+   var STAIRS_BOTH = {ctor: "STAIRS_BOTH"};
+   var STAIRS_DOWN = {ctor: "STAIRS_DOWN"};
+   var STAIRS_UP = {ctor: "STAIRS_UP"};
+   var mergeFeature = F2(function (f,
+   r) {
+      return function () {
+         switch (f.ctor)
+         {case "STAIRS_DOWN":
+            return function () {
+                 var _v7 = r.feature;
+                 switch (_v7.ctor)
+                 {case "STAIRS_DOWN":
+                    return _U.replace([["feature"
+                                       ,STAIRS_BOTH]],
+                      r);}
+                 return _U.replace([["feature"
+                                    ,STAIRS_UP]],
+                 r);
+              }();}
+         return r;
+      }();
+   });
+   var TELEPORTER = {ctor: "TELEPORTER"};
+   var PIT = {ctor: "PIT"};
+   var ELEVATOR = {ctor: "ELEVATOR"};
+   var NONE = {ctor: "NONE"};
+   var decodeFeature = function (n) {
+      return function () {
+         switch (n)
+         {case 0: return NONE;
+            case 1: return ELEVATOR;
+            case 2: return PIT;
+            case 3: return TELEPORTER;
+            case 4: return STAIRS_DOWN;
+            case 5: return ALTAR;
+            case 6: return FOUNTAIN;
+            case 7: return CUBE;
+            case 8: return THRONE;
+            case 9: return BOX;
+            case 10: return ELEVATOR;
+            case 11: return PIT;
+            case 12: return TELEPORTER;
+            case 13: return STAIRS_DOWN;
+            case 14: return ALTAR;
+            case 15: return FOUNTAIN;}
+         _E.Case($moduleName,
+         "between lines 70 and 87");
+      }();
+   };
+   var featureSymbol = function (f) {
+      return function () {
+         switch (f.ctor)
+         {case "ALTAR":
+            return _J.toList([altar]);
+            case "BOX":
+            return _J.toList([box]);
+            case "CUBE":
+            return _J.toList([cube]);
+            case "ELEVATOR":
+            return _J.toList([elevator]);
+            case "FOUNTAIN":
+            return _J.toList([fountain]);
+            case "NONE":
+            return _J.toList([]);
+            case "PIT":
+            return _J.toList([pit]);
+            case "STAIRS_BOTH":
+            return _J.toList([stairsBoth]);
+            case "STAIRS_DOWN":
+            return _J.toList([stairsDown]);
+            case "STAIRS_UP":
+            return _J.toList([stairsUp]);
+            case "TELEPORTER":
+            return _J.toList([teleport]);
+            case "THRONE":
+            return _J.toList([throne]);}
+         _E.Case($moduleName,
+         "between lines 152 and 165");
+      }();
+   };
+   var WALL = {ctor: "WALL"};
+   var DOOR = {ctor: "DOOR"};
+   var EMPTY = {ctor: "EMPTY"};
+   var decodeBoundary = function (x) {
+      return function () {
+         var n = A2(Basics.mod,x,4);
+         return _U.eq(n,
+         2) ? DOOR : _U.eq(n,
+         3) ? WALL : EMPTY;
+      }();
+   };
+   var decodeBoundaryAt = F2(function (c,
+   h) {
+      return _U.eq(c,1) || _U.eq(c,
+      201) ? WALL : decodeBoundary(h);
+   });
+   var emptyRoom = {_: {}
+                   ,feature: NONE
+                   ,left: EMPTY
+                   ,top: EMPTY};
+   var rawRoomAt = function (p) {
+      return Basics.not(inBounds(p)) || onSoutheastCorner(p) ? emptyRoom : _U.eq(p.x,
+      201) ? _U.replace([["left"
+                         ,WALL]],
+      emptyRoom) : _U.eq(p.y,
+      201) ? _U.replace([["top"
+                         ,WALL]],
+      emptyRoom) : function () {
+         var fz = Basics.toFloat(p.z);
+         var fy = Basics.toFloat(p.y);
+         var fx = Basics.toFloat(p.x);
+         var q = fx * xo + fy * yo + fz * zo + (fx + xo) * (fy + yo) * (fz + zo);
+         var h = Basics.floor(frac(q) * 4694);
+         var hi = h / 256 | 0;
+         var ft = _U.eq(hi,
+         0) || _U.cmp(hi,
+         5) > 0 ? 0 : Basics.floor(frac(10 * q) * 15) + 1;
+         return {_: {}
+                ,feature: decodeFeature(ft)
+                ,left: A2(decodeBoundaryAt,
+                p.x,
+                h / 4 | 0)
+                ,top: A2(decodeBoundaryAt,
+                p.y,
+                h)};
+      }();
+   };
+   var roomAt = function (p) {
+      return function () {
+         var m = A2(mergeFeature,
+         rawRoomAt(_U.replace([["z"
+                               ,p.z - 1]],
+         p)).feature,
+         rawRoomAt(p));
+         return _U.eq(p.z,
+         1) ? A3(mapFeature,
+         ELEVATOR,
+         STAIRS_UP,
+         m) : _U.eq(p.z,
+         50) ? function ($) {
+            return A2(mapFeature,
+            PIT,
+            ELEVATOR)(A2(mapFeature,
+            STAIRS_DOWN,
+            NONE)($));
+         }(m) : m;
+      }();
+   };
+   var drawRoom = function (r) {
+      return _L.append(function () {
+         var _v10 = r.top;
+         switch (_v10.ctor)
+         {case "DOOR":
+            return _J.toList([Graphics.Collage.moveY(24)(hdoor)]);
+            case "EMPTY":
+            return _J.toList([]);
+            case "WALL":
+            return _J.toList([Graphics.Collage.moveY(24)(hwall)]);}
+         _E.Case($moduleName,
+         "between lines 174 and 177");
+      }(),
+      _L.append(function () {
+         var _v11 = r.left;
+         switch (_v11.ctor)
+         {case "DOOR":
+            return _J.toList([Graphics.Collage.moveX(-24)(vdoor)]);
+            case "EMPTY":
+            return _J.toList([]);
+            case "WALL":
+            return _J.toList([Graphics.Collage.moveX(-24)(vwall)]);}
+         _E.Case($moduleName,
+         "between lines 178 and 181");
+      }(),
+      featureSymbol(r.feature)));
+   };
+   var drawRoomAt = F2(function (p,
+   _v12) {
+      return function () {
+         switch (_v12.ctor)
+         {case "_Tuple2":
+            return List.map(Graphics.Collage.move({ctor: "_Tuple2"
+                                                  ,_0: 48 * Basics.toFloat(_v12._0)
+                                                  ,_1: -48 * Basics.toFloat(_v12._1)}))(drawRoom(roomAt(_U.replace([["x"
+                                                                                                                    ,p.x + _v12._0]
+                                                                                                                   ,["y"
+                                                                                                                    ,p.y + _v12._1]],
+              p))));}
+         _E.Case($moduleName,
+         "between lines 186 and 187");
+      }();
+   });
+   var drawNeighborhood = function (p) {
+      return A2(List.concatMap,
+      drawRoomAt(p),
+      allOffsets);
+   };
+   var drawView = function (p) {
+      return Graphics.Element.color(Color.charcoal)(A2(Graphics.Element.beside,
+      Graphics.Element.color(Color.black)(A3(Graphics.Collage.collage,
+      632,
+      632,
+      drawNeighborhood(p))),
+      A4(Graphics.Element.container,
+      200,
+      632,
+      Graphics.Element.midTop,
+      Text.markdown("<div style=\"height:0;width:0;\">&nbsp;</div><p><img src=\"stairs.png\" /> Stairway up</p>\n<p><img src=\"stairsBoth.png\" /> Stairway up and down</p>\n<p><img src=\"stairsDown.png\" /> Stairway down</p>\n<p><img src=\"elevator.png\" /> Elevator</p>\n<p><img src=\"pit.png\" /> Pit</p>\n<p><img src=\"teleport.png\" /> Teleportal</p>\n<p><img src=\"altar.png\" /> Altar</p>\n<p><img src=\"fountain.png\" /> Fountain</p>\n<p><img src=\"throne.png\" /> Gem encrusted throne</p>\n<p><img src=\"grayMistyCube.png\" /> Gray misty cube</p>\n<p><img src=\"box.png\" /> Small box with buttons</p>\n<hr />\n<p><em>Arrow Keys</em>: Pan the map</p>\n<p><em>U, D</em>: Go up or down a level</p><div style=\"height:0;width:0;\">&nbsp;</div>",
+      "199:37"))));
+   };
+   var main = A2(Signal._op["<~"],
+   drawView,
+   stateSignal);
+   _elm.Main.values = {_op: _op
+                      ,keyCodeCommand: keyCodeCommand
+                      ,commandStream: commandStream
+                      ,initState: initState
+                      ,bound: bound
+                      ,vbound: vbound
+                      ,update: update
+                      ,stateSignal: stateSignal
+                      ,decodeBoundary: decodeBoundary
+                      ,decodeBoundaryAt: decodeBoundaryAt
+                      ,decodeFeature: decodeFeature
+                      ,emptyRoom: emptyRoom
+                      ,onSoutheastCorner: onSoutheastCorner
+                      ,inBounds: inBounds
+                      ,xo: xo
+                      ,yo: yo
+                      ,zo: zo
+                      ,frac: frac
+                      ,rawRoomAt: rawRoomAt
+                      ,mapFeature: mapFeature
+                      ,mergeFeature: mergeFeature
+                      ,roomAt: roomAt
+                      ,stairsUp: stairsUp
+                      ,stairsDown: stairsDown
+                      ,stairsBoth: stairsBoth
+                      ,elevator: elevator
+                      ,pit: pit
+                      ,teleport: teleport
+                      ,altar: altar
+                      ,fountain: fountain
+                      ,cube: cube
+                      ,throne: throne
+                      ,box: box
+                      ,featureSymbol: featureSymbol
+                      ,hdoor: hdoor
+                      ,hwall: hwall
+                      ,vdoor: vdoor
+                      ,vwall: vwall
+                      ,drawRoom: drawRoom
+                      ,drawRoomAt: drawRoomAt
+                      ,offsets: offsets
+                      ,allOffsets: allOffsets
+                      ,drawNeighborhood: drawNeighborhood
+                      ,drawView: drawView
+                      ,main: main
+                      ,EMPTY: EMPTY
+                      ,DOOR: DOOR
+                      ,WALL: WALL
+                      ,NONE: NONE
+                      ,ELEVATOR: ELEVATOR
+                      ,PIT: PIT
+                      ,TELEPORTER: TELEPORTER
+                      ,STAIRS_UP: STAIRS_UP
+                      ,STAIRS_DOWN: STAIRS_DOWN
+                      ,STAIRS_BOTH: STAIRS_BOTH
+                      ,ALTAR: ALTAR
+                      ,FOUNTAIN: FOUNTAIN
+                      ,CUBE: CUBE
+                      ,THRONE: THRONE
+                      ,BOX: BOX
+                      ,ERROR: ERROR
+                      ,NORTH: NORTH
+                      ,EAST: EAST
+                      ,SOUTH: SOUTH
+                      ,WEST: WEST
+                      ,UP: UP
+                      ,DOWN: DOWN
+                      ,Room: Room
+                      ,Position: Position};
+   return _elm.Main.values;
+};</script></head><body><script type="text/javascript">Elm.fullscreen(Elm.Main)</script><noscript></noscript></body></html>
