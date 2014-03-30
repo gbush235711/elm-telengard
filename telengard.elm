@@ -15,16 +15,23 @@ data Feature = NONE | ELEVATOR | PIT | TELEPORTER | STAIRS_UP | STAIRS_DOWN
 
 data Spell = AstralWalk
 
+type SpellEffect = {name : String, abbr : String, duration : Int}
+
+type RandomCtx = {clumsinessAroundPits : Float, itemDesirability : Float, sneakiness : Float, monsterLevel : Float, monsterPower : Float, monsterHealth : Float,
+  undeadFearOfLight : Float, sexiness : Float, possessiveness : Float, teleporterInstability : Float}
+
 data Command = ERROR | NORTH | EAST | SOUTH | WEST | UP | DOWN | STAY |
-  FIGHT | CAST Spell | TICK | ROLL Float | CONTINUE
+  FIGHT | CAST Spell | TICK | ROLL RandomCtx | CONTINUE
 
-data MonsterClass = Dwarf
+type Monster = {name : String, img : Form, power : Int, level : Int, hp : Int}
 
-type Monster = {class : MonsterClass, level : Int, hp : Int}
+data Action = WAITING | FIGHTING Monster | FALLING Int | RISING Int | TELEPORTING Int | RESTING | READING Int Form (GameState -> GameState)
 
-data Action = WAITING | FIGHTING Monster | FALLING Int | RISING Int | TELEPORTING Int | RESTING
+data OnRoll = NoChange | ContinueWith (Float -> GameState -> GameState)
 
-data EquipmentClass = Sword | Armor | Shield | ElvenCloak | ElvenBoots | RingOfRegeneration | RingOfProtection
+--data EquipmentClass = Sword | Armor | Shield | ElvenCloak | ElvenBoots | RingOfRegeneration | RingOfProtection
+
+type Equipment = {name : String, abbr : String, bonus : Int, isAlwaysEquipped : Bool}
 
 data ConsumableClass = ScrollOfRescue | PotionOfHealing | PotionOfStrength
 
@@ -36,9 +43,14 @@ type Stats = {str : Int, int : Int, wis : Int, con : Int, dex : Int, chr : Int}
 
 type GameState = {action : Action, pos : Position, name : String, level : Int,
   stats : Stats, hp : Int, maxhp : Int, su : Int, maxsu : Int, exp : Int, gold : Int,
-  equipmentBonus : Dict Int Int, consumableCount : Dict Int Int,
+  equipment : [Equipment],
+  consumableCount : ConsumableClass -> Int,
+  effects : [SpellEffect],
   msg : String, msgTimer : Int,
-  idleTimer : Int, phaseWalkDuration : Int, rnd : Float}
+  prompt : [String],
+  idleTimer : Int,
+  rnd : RandomCtx
+}
 
 dungeonWidth = 200
 dungeonHeight = 200
@@ -66,22 +78,62 @@ keyCodeCommand n = case n of
 tickCommand : Float -> Command
 tickCommand t = TICK
 
-randomCommand : Float -> Command
-randomCommand x = ROLL x
+type Glom = {n : Int, rnd : RandomCtx}
+
+randomGlom : Float -> Glom -> Glom
+randomGlom x {n, rnd} = case n of
+  0 -> {n = n + 1, rnd = {rnd | clumsinessAroundPits <- x}}
+  1 -> {n = n + 1, rnd = {rnd | itemDesirability <- x}}
+  2 -> {n = n + 1, rnd = {rnd | sneakiness <- x}}
+  3 -> {n = n + 1, rnd = {rnd | monsterLevel <- x}}
+  4 -> {n = n + 1, rnd = {rnd | monsterPower <- x}}
+  5 -> {n = n + 1, rnd = {rnd | monsterHealth <- x}}
+  6 -> {n = n + 1, rnd = {rnd | undeadFearOfLight <- x}}
+  7 -> {n = n + 1, rnd = {rnd | sexiness <- x}}
+  8 -> {n = n + 1, rnd = {rnd | possessiveness <- x}}
+  9 -> {n = 0, rnd = {rnd | teleporterInstability <- x}}
+
+initRnd = {clumsinessAroundPits = 0.0, itemDesirability = 0.0, sneakiness = 0.0, monsterLevel = 0.0, monsterPower = 0.0, monsterHealth = 0.0,
+    undeadFearOfLight = 0.0, sexiness = 0.0, possessiveness = 0.0, teleporterInstability = 0.0}
+
+randomCommand : Glom -> Command
+randomCommand {n, rnd} = ROLL rnd
 
 commandStream : Signal Command
 commandStream = (keyCodeCommand <~ Keyboard.lastPressed) `merge`
                 (tickCommand <~ (every (second / 10))) `merge`
-                (randomCommand <~ Random.float (every (second / 10)))
+                (randomCommand <~ keepIf (\g -> g.n == 0) {n = 0, rnd = initRnd} (foldp randomGlom {n = 0, rnd = initRnd} (Random.float (every (second / 100)))))
 
 -- State Changes
+
+effect : String -> String -> Int -> SpellEffect
+effect n a d = {name = n, abbr = a, duration = d}
+
+equip : String -> String -> Bool -> Int -> Equipment
+equip n a c b = {name = n, abbr = a, isAlwaysEquipped = c, bonus = b}
 
 initStats = {str = 9, int = 9, wis = 9, con = 9, dex = 9, chr = 9}
 
 initState = {action = WAITING, pos = {x = 25, y = 13, z = 1},
   name = "STABULO", level = 1, stats = initStats, hp = 9, maxhp = 9, su = 1, maxsu = 1, exp = 0, gold = 0,
-  equipmentBonus = Dict.empty, consumableCount = Dict.empty,
-  msg = "", msgTimer = 0, idleTimer = 50, phaseWalkDuration = 0, rnd = 0.0}
+
+  equipment = [equip "SWORD" "SWORD" True 0,
+    equip "ARMOR" "ARMOR" True 0,
+    equip "SHIELD" "SHIELD" True 0,
+    equip "ELVEN CLOAK" "ELVN CLK" False 0,
+    equip "ELVEN BOOTS" "ELVN BTS" False 0,
+    equip "RING OF REGENERATION" "RING REG" False 0,
+    equip "RING OF PROTECTION" "RING PROT" False 0],
+
+  --data EquipmentClass = Sword | Armor | Shield | ElvenCloak | ElvenBoots | RingOfRegeneration | RingOfProtection
+
+
+  consumableCount = \c -> 0,
+  effects = [effect "Strength" "STRG" 0, effect "Detect Traps" "DTRP" 0, effect "Light" "LGHT" 0, effect "Protection from Evil" "PROT" 0,
+    effect "Levitation" "LEVT" 0, effect "Invisibility" "INVS" 0, effect "Fear" "FEAR" 0, effect "Astral Walk" "ASTW" 0, effect "Time Stop" "TMST" 0,
+    effect "Resurrection" "RESD" 0, effect "Drunk" "DRNK" 0],
+  msg = "", msgTimer = 0, prompt = [], idleTimer = 50,
+  rnd = initRnd} |> checkForTraps
 
 wbound : Int -> Int
 wbound x = clamp 1 dungeonWidth x
@@ -113,21 +165,24 @@ bottomOf p = {p | z <- p.z + 1}
 travel : (Position -> Position) -> GameState -> GameState
 travel f s = {s | pos <- f s.pos}
 
+hasEffect : String -> GameState -> Bool
+hasEffect n s = s.effects |> any (\sf -> sf.name == n && sf.duration > 0)
+
 canMoveNorth : GameState -> Bool
 canMoveNorth s = s.action == WAITING && s.pos.y > 1 &&
-  (s.phaseWalkDuration > 0 || (roomAt s.pos).top /= WALL)
+  ((s |> hasEffect "Astral Walk") || (roomAt s.pos).top /= WALL)
 
 canMoveWest : GameState -> Bool
 canMoveWest s = s.action == WAITING && s.pos.x > 1 &&
-  (s.phaseWalkDuration > 0 || (roomAt s.pos).left /= WALL)
+  ((s |> hasEffect "Astral Walk") || (roomAt s.pos).left /= WALL)
 
 canMoveSouth : GameState -> Bool
 canMoveSouth s = s.action == WAITING && s.pos.y < 200 &&
-  (s.phaseWalkDuration > 0 || (roomAt (southOf s.pos)).top /= WALL)
+  ((s |> hasEffect "Astral Walk") || (roomAt (southOf s.pos)).top /= WALL)
 
 canMoveEast : GameState -> Bool
 canMoveEast s = s.action == WAITING && s.pos.x < 200 &&
-  (s.phaseWalkDuration > 0 || (roomAt (eastOf s.pos)).left /= WALL)
+  ((s |> hasEffect "Astral Walk") || (roomAt (eastOf s.pos)).left /= WALL)
 
 canClimb : Feature -> Bool
 canClimb f = f == STAIRS_UP || f == STAIRS_BOTH
@@ -150,38 +205,139 @@ wtf : GameState -> GameState
 wtf s = s |> withMessage "No"
 
 reduceSpellDurations : GameState -> GameState
-reduceSpellDurations s = if s.phaseWalkDuration > 0
-  then {s | phaseWalkDuration <- s.phaseWalkDuration - 1}
-  else s
+reduceSpellDurations s = {s | effects <- map (\sf -> {sf | duration <- max 0 (sf.duration - 1)}) s.effects}
+
+findWithDefault : a -> (a -> Bool) -> [a] -> a
+findWithDefault d p s = case s of
+  [] -> d
+  x :: s -> if p x then x else findWithDefault d p s
+
+equipmentBonus : String -> GameState -> Int
+equipmentBonus n s = findWithDefault {name = "", abbr = "", isAlwaysEquipped = False, bonus = 0} (\q -> q.name == n) s.equipment |> .bonus
+
+regenerate : GameState -> GameState
+regenerate s = {s | hp <- min (s.hp + equipmentBonus "RING OF REGENERATION" s) s.maxhp}
 
 resetIdleTimer : GameState -> GameState
 resetIdleTimer s = {s | idleTimer <- 50}
 
+promptStairway : Bool -> Bool -> GameState -> GameState
+promptStairway u d s = s |> clearPrompt
+  |> prompt "YOU HAVE FOUND A STAIRWAY"
+  |> (if u && s.pos.z == 1 then prompt "YOU SEE `LIGHT` ABOVE" else id)
+  |> prompt ("DO YOU WANT TO " ++ (if u then "GO `U`P, " else "") ++ (if d then "GO `D`OWN," else ""))
+  |> prompt "OR `S`TAY ON THE SAME LEVEL?"
+
+--roll : (Float -> GameState -> GameState) -> GameState -> GameState
+--roll f s = {s | onRoll <- ContinueWith (\r s -> f r {s | onRoll <- NoChange})}
+
 checkForTraps : GameState -> GameState
 checkForTraps s = case (roomAt s.pos).feature of
-  PIT        -> if s.rnd < 0.5 then {s | action <- FALLING 21} else s
-  ELEVATOR   -> {s | action <- RISING 21}
-  TELEPORTER -> {s | action <- TELEPORTING 10}
-  _          -> s
+  PIT        -> s |> clearPrompt
+                  |> prompt "YOU SEE A PIT"
+                  |> if s.rnd.clumsinessAroundPits < 0.5 then setAction (FALLING 21) `andThen` prompt "YOU FALL IN!!" else setAction WAITING `andThen` prompt "YOU CAN GO `D`OWN OR TRAVEL ON"
+  ELEVATOR   -> {s | action <- RISING 21, prompt <- ["YOU FEEL HEAVY FOR A MOMENT"]}
+  TELEPORTER -> {s | action <- TELEPORTING 21, prompt <- ["ZZAP!! YOU'VE BEEN TELEPORTED..."]}
+  STAIRS_UP -> s |> promptStairway True False
+  STAIRS_BOTH -> s |> promptStairway True True
+  STAIRS_DOWN -> s |> promptStairway False True
+  _          -> s |> clearPrompt
 
-power : MonsterClass -> Int
-power c = case c of
-  Dwarf -> 11
+mc n i p u = {name = n, img = i, power = p, isUndead = u}
 
--- TODO: Check for invisibility, fear, elven cloak effect, more monster classes, light vs undead,
--- monster healing, monster stealing, monster gifting, initiative check, protection from evil
+monsterClass n = case n of
+  1 -> mc "GNOLL" gnoll 1 False 
+  2 -> mc "KOBOLD" kobold 2 False
+  3 -> mc "SKELETON" skeleton 3 True
+  4 -> mc "HOBBIT" hobbit 4 False
+  5 -> mc "ZOMBIE" zombie 5 True
+  6 -> mc "ORC" orc 6 False
+  7 -> mc "FIGHTER" fighter 7 False
+  8 -> mc "MUMMY" mummy 8 True
+  9 -> mc "ELF" elf 9 False
+  10 -> mc "GHOUL" ghoul 10 True
+  11 -> mc "DWARF" dwarf 11 False
+  12 -> mc "TROLL" troll 12 False
+  13 -> mc "WRAITH" wraith 13 True
+  14 -> mc "OGRE" ogre 14 False
+  15 -> mc "MINOTAUR" minotaur 15 False
+  16 -> mc "GIANT" giant 16 False
+  17 -> mc "SPECTER" specter 17 True
+  18 -> mc "VAMPIRE" vampire 18 True
+  19 -> mc "DEMON" demon 19 False
+  20 -> mc "DRAGON" dragon 20 False
+
+-- TODO: Check for invisibility, elven cloak effect, more monster classes, time stop
+-- monster stealing, monster gifting, initiative check, protection from evil
+
+dn : Int -> Float -> Int
+dn n r = floor (frac r * toFloat n + 1)
+
+chance : Float -> Float -> Bool
+chance f r = frac r < f
+
+after : Int -> Form -> (GameState -> GameState) -> GameState -> GameState
+after t i f = setAction (READING t i f)
+
+fullHeal : GameState -> GameState
+fullHeal s = {s | hp <- s.maxhp}
+
+andThen : (a -> b) -> (b -> c) -> a -> c
+andThen f g x = g (f x)
+
+--roll9 : (Float -> Float -> Float -> Float -> Float -> Float -> Float -> Float -> Float -> GameState -> GameState) -> GameState -> GameState
+--roll9 f s = s |> roll (\r1 -> roll (\r2 -> roll (\r3 -> roll (\r4 -> roll (\r5 -> roll (\r6 -> roll (\r7 -> roll (\r8 -> roll (\r9 -> f r1 r2 r3 r4 r5 r6 r7 r8 r9)))))))))
+
+stuffToSteal : GameState -> [Equipment]
+stuffToSteal s = filter (\q -> q.bonus > 0) s.equipment
+
+hasAnythingToSteal : GameState -> Bool
+hasAnythingToSteal s = any (\q -> q.bonus > 0) s.equipment
+
+steal : String -> GameState -> GameState
+steal n s = {s | equipment <- s.equipment |> map (\q -> if q.name == n then {q | bonus <- 0} else q)}
+
+at : Int -> [a] -> a
+at n s = drop n s |> head
+
+
+stealSomething : Form -> GameState -> GameState
+stealSomething f s = s |> let
+    ss = stuffToSteal s
+    n = floor (s.rnd.itemDesirability * toFloat (length ss))
+    q = at n ss
+  in prompt ("HE STEALS YOUR " ++ q.name) `andThen` steal q.name `andThen` after 30 f (setAction WAITING `andThen` checkForTraps)
 
 checkForEncounter : GameState -> GameState
-checkForEncounter s = if s.rnd < 0.3 then
+checkForEncounter s = s |> if s.rnd.sneakiness < 0.3 then
   let
-    c = Dwarf
-    l = floor ((frac (s.rnd * 10) ^ 1.5) * (toFloat s.pos.z * 2 + 2) + 1)
-    h = floor ((frac (s.rnd * 1000) ^ 0.5) * toFloat l * toFloat (power c) + 1)
+    c = monsterClass (dn 20 s.rnd.monsterPower)
+    l = floor ((s.rnd.monsterLevel ^ 1.5) * (toFloat s.pos.z * 2 + 2) + 1)
+    h = floor ((s.rnd.monsterHealth ^ 0.5) * toFloat l * toFloat c.power + 1)
   in
-  {s | action <- FIGHTING {class = Dwarf, level = l, hp = h}} else checkForTraps s
+    if (s |> hasEffect "Fear") && c.power < 5 then
+      checkForEncounter
+    else if (s |> hasEffect "Light") && c.isUndead && chance 0.2 s.rnd.undeadFearOfLight then
+      checkForEncounter
+    else
+      setAction (FIGHTING {name = c.name, img = c.img, power = c.power, level = l, hp = h})
+      `andThen` clearPrompt
+       `andThen` prompt ("YOU HAVE ENCOUNTERED A LVL " ++ show l ++ " " ++ c.name)
+        `andThen` (if (c.name == "ELF" && chance (0.04 * toFloat s.stats.chr) s.rnd.sexiness) || chance 0.02 s.rnd.sexiness then
+              fullHeal
+              `andThen` prompt ("THE " ++ c.name ++ " LIKES YOUR BODY")
+              `andThen` prompt "HE HEALS YOU TO FULL STRENGTH"
+              `andThen` after 30 c.img (checkForTraps . setAction WAITING)
+            else if (c.name == "HOBBIT" && chance (1.0 - 0.05 * toFloat s.stats.dex) s.rnd.possessiveness) || chance 0.02 s.rnd.possessiveness then
+              prompt ("THE " ++ c.name ++ " MAKES A QUICK MOVE") `andThen`
+               (if hasAnythingToSteal s then
+                  stealSomething c.img
+                else prompt "YOU HAVE NOTHING HE WANTS TO STEAL!" `andThen` after 30 c.img (setAction WAITING `andThen` checkForTraps))
+            else prompt "`F`IGHT, `C`AST, OR `E`VADE:")
+  else setAction WAITING `andThen` checkForTraps
 
 successfully : GameState -> GameState
-successfully = checkForEncounter . resetIdleTimer . reduceSpellDurations
+successfully = checkForEncounter . resetIdleTimer . regenerate . reduceSpellDurations
 
 canCast : Spell -> GameState -> Bool
 canCast a s = s.pos.z > 0
@@ -202,16 +358,17 @@ idle : GameState -> GameState
 idle s = case s.action of
   WAITING       -> if s.pos.z > 0 && s.idleTimer <= 1 then resetIdleTimer s |> withMessage "Stay" |> successfully
                    else {s | idleTimer <- s.idleTimer - 1}
-  FIGHTING    _ -> if s.idleTimer <= 1 then resetIdleTimer s |> withMessage "Wait" |> successfully
+  FIGHTING    _ -> if s.idleTimer <= 1 then resetIdleTimer s |> withMessage "Wait"
                    else {s | idleTimer <- s.idleTimer - 1}
-  FALLING     n -> if n == 0 then {s | action <- WAITING} |> travel bottomOf |> successfully
+  FALLING     n -> if n == 0 then {s | action <- WAITING, prompt <- []} |> travel bottomOf |> successfully
                    else {s | action <- FALLING (n - 1)}
-  RISING      n -> if n == 0 then {s | action <- WAITING} |> travel topOf |> successfully
+  RISING      n -> if n == 0 then {s | action <- WAITING, prompt <- []} |> travel topOf |> successfully
                    else {s | action <- RISING (n - 1)}
-  TELEPORTING n -> if n == -10 then {s | action <- WAITING} |> successfully
-                   else {s | action <- TELEPORTING (n - 1)} |>
-                     if n == 0 then travel (randomPos s.rnd) else id
-  RESTING       -> s
+  TELEPORTING n -> if n == -21 then {s | action <- WAITING, prompt <- []} |> successfully
+                   else s |> setAction (TELEPORTING (n - 1))
+                          |> if n == 0 then travel (randomPos s.rnd.teleporterInstability) `andThen` setAction (TELEPORTING (n - 1)) else id
+  RESTING       -> s |> clearPrompt
+  READING n i f -> if n == 0 then f s else {s | action <- READING (n - 1) i f}
 
 isFighting : GameState -> Bool
 isFighting s = case s.action of
@@ -220,6 +377,18 @@ isFighting s = case s.action of
 
 setAction : Action -> GameState -> GameState
 setAction a s = {s | action <- a}
+
+increaseDuration : String -> Int -> GameState -> GameState
+increaseDuration n t s = {s | effects <- map (\sf -> {sf | duration <- if sf.name == n then sf.duration + t else sf.duration}) s.effects}
+
+prompt : String -> GameState -> GameState
+prompt m s = {s | prompt <- s.prompt ++ [m]}
+
+clearPrompt : GameState -> GameState
+clearPrompt s = {s | prompt <- []}
+
+--fight : GameState -> GameState
+--fight s = s |> clearPrompt
 
 update : Command -> GameState -> GameState
 update c s = case c of
@@ -243,13 +412,13 @@ update c s = case c of
             then travel bottomOf s |> withMessage "Down" |> successfully
             else wtf s
   STAY   -> s |> withMessage "Stay" |> successfully
-  FIGHT  -> if s |> isFighting then s |> setAction WAITING |> checkForTraps |> withMessage "You killed it!" |> resetIdleTimer
+  FIGHT  -> if s |> isFighting then s |> clearPrompt |> setAction WAITING |> checkForTraps |> withMessage "You killed it!" |> resetIdleTimer
             else wtf s
-  CAST a -> if s |> canCast a then {s | phaseWalkDuration <- s.phaseWalkDuration + 10}
+  CAST a -> if s |> canCast a then increaseDuration "Astral Walk" 10 s |> withMessage "Cast" |> resetIdleTimer
             else wtf s
   CONTINUE -> if s.action == RESTING then s |> travel bottomOf |> setAction WAITING |> successfully else s
   TICK   -> reduceMessageTimer (idle s)
-  ROLL x -> {s | rnd <- x}
+  ROLL ctx -> {s | rnd <- ctx}
 
 stateSignal : Signal GameState
 stateSignal = foldp update initState commandStream
@@ -359,7 +528,26 @@ cube = charForm "cubeb.png" |> move (-9 * zoom, 10 * zoom)
 throne = spriteForm "throneb.png" |> move (-8 * zoom, 16 * zoom)
 box = charForm "boxb.png" |> move (-9 * zoom, 9 * zoom)
 
+gnoll = ghoul
+kobold = ghoul
+skeleton = ghoul
+hobbit = dwarf
+zombie = ghoul
+orc = dwarf
+fighter = dwarf
+mummy = ghoul
+elf = dwarf
+troll = ghoul
+wraith = ghoul
+ogre = dwarf
+minotaur = dwarf
+giant = dwarf
+specter = ghoul
+vampire = ghoul
+demon = ghoul
+dragon = ghoul
 dwarf = spriteForm "dwarf.png" |> move (-8 * zoom, 8 * zoom)
+ghoul = spriteForm "ghoul.png" |> move (-10 * zoom, 10 * zoom)
 
 featureSymbol : Feature -> [Form]
 featureSymbol f = case f of
@@ -509,17 +697,14 @@ drawNeighborhood : Position -> [Form]
 drawNeighborhood p = let ns = neighborhood p in
   drawNorthQuad ns ++ drawWestQuad ns ++ drawSouthQuad ns ++ drawEastQuad ns
 
-drawMonster : MonsterClass -> Form
-drawMonster c = case c of
-  Dwarf -> dwarf
-
 drawAction : GameState -> [Form]
 drawAction s = case s.action of
   FALLING n -> [fallingHero n |> moveY (toFloat (zoom * (n - 21)) / 2)]
   RISING n -> [elevator |> moveY (toFloat (zoom * (21 - n))),
     hero |> moveY (toFloat (zoom * (21 - n)))]
-  TELEPORTING n -> [hero, rect 800 600 |> filled (rgba 0 0 0 ((10 - abs (toFloat n)) / 10))]
-  FIGHTING {class, level, hp} -> [drawMonster class, hero]
+  TELEPORTING n -> [hero, rect 800 600 |> filled (rgba 0 0 0 ((21 - abs (toFloat n)) / 21))]
+  FIGHTING m -> [m.img, hero]
+  READING n i f -> [i, hero]
   _ -> (roomAt s.pos |> .feature |> featureSymbol) ++ [hero]
 
 adjectives = ["SALTY", "BOLD", "LOUD", "OLD", "GOODLY", "WORTHY", "LOFTY", "FINE", "ROCKY", "AGED"]
@@ -546,7 +731,7 @@ innDesc p = ["YOU HAVE FOUND THE " ++ innName p,
   "PRESS <RET> TO RETURN TO THE DUNGEON"]
 
 drawInn : GameState -> [Form]
-drawInn s = [group (c64s (innDesc s.pos)) |> move (-10 * 24, -10 * 24), hero]
+drawInn s = [c64s (innDesc s.pos) |> move (-12 * 24 + 12, -10 * 24), hero]
 
 drawGameState : GameState -> [Form]
 drawGameState s = if s.pos.z == 0 then drawInn s
@@ -555,127 +740,102 @@ drawGameState s = if s.pos.z == 0 then drawInn s
 textify : String -> Element
 textify s = toText ("   " ++ s) |> centered
 
-spellEffects : GameState -> String
-spellEffects s = if s.phaseWalkDuration > 0 then "Astral Walk" else ""
+spellEffectsStr : GameState -> String
+spellEffectsStr s = map (\sf -> if sf.duration > 0 then sf.abbr ++ " " else "") s.effects |> foldl (++) ""
 
-className : MonsterClass -> String
-className c = case c of
-  Dwarf -> "DWARF"
+monsterStatus : GameState -> Form
+monsterStatus s = case s.action of
+  FIGHTING m -> c64 ("`LVL " ++ show m.level ++ " " ++ m.name) |> move (4 * 24, -5 * 24)
+  _ -> empty |> toForm
 
-actionMessage : GameState -> String
-actionMessage s = case s.action of
-  FIGHTING m -> "YOU HAVE ENCOUNTERED A LVL " ++ show m.level ++ " " ++ className m.class ++ " (" ++ show m.hp ++ ")"
-  FALLING _ -> "YOU SEE A PIT   YOU FALL IN!!"
-  RISING _ -> "YOU FEEL HEAVY FOR A MOMENT"
-  TELEPORTING _ -> "ZZAP!! YOU'VE BEEN TELEPORTED..."
-  RESTING -> "BLAH"
-  _ -> "->"
+charAt : (Int, Int) -> Element
+charAt (x, y) = croppedImage (x * 24, y * 24) 24 24 "charset.png"
 
-charAt : (Int, Int) -> Form
-charAt (x, y) = croppedImage (x * 24, y * 24) 24 24 "charset.png" |> toForm
-
-c64Char : Char -> Form
-c64Char c = case c of
-  '@' -> charAt (0, 0)
-  'A' -> charAt (1, 0)
-  'B' -> charAt (2, 0)
-  'C' -> charAt (3, 0)
-  'D' -> charAt (4, 0)
-  'E' -> charAt (5, 0)
-  'F' -> charAt (6, 0)
-  'G' -> charAt (7, 0)
-  'H' -> charAt (8, 0)
-  'I' -> charAt (9, 0)
-  'J' -> charAt (10, 0)
-  'K' -> charAt (11, 0)
-  'L' -> charAt (12, 0)
-  'M' -> charAt (13, 0)
-  'N' -> charAt (14, 0)
-  'O' -> charAt (15, 0)
-  'P' -> charAt (16, 0)
-  'Q' -> charAt (17, 0)
-  'R' -> charAt (18, 0)
-  'S' -> charAt (19, 0)
-  'T' -> charAt (20, 0)
-  'U' -> charAt (21, 0)
-  'V' -> charAt (22, 0)
-  'W' -> charAt (23, 0)
-  'X' -> charAt (24, 0)
-  'Y' -> charAt (25, 0)
-  'Z' -> charAt (26, 0)
-  '[' -> charAt (27, 1)
+c64Char : Int -> Char -> Element
+c64Char off c = case c of
+  '@' -> charAt (0, off)
+  'A' -> charAt (1, off)
+  'B' -> charAt (2, off)
+  'C' -> charAt (3, off)
+  'D' -> charAt (4, off)
+  'E' -> charAt (5, off)
+  'F' -> charAt (6, off)
+  'G' -> charAt (7, off)
+  'H' -> charAt (8, off)
+  'I' -> charAt (9, off)
+  'J' -> charAt (10, off)
+  'K' -> charAt (11, off)
+  'L' -> charAt (12, off)
+  'M' -> charAt (13, off)
+  'N' -> charAt (14, off)
+  'O' -> charAt (15, off)
+  'P' -> charAt (16, off)
+  'Q' -> charAt (17, off)
+  'R' -> charAt (18, off)
+  'S' -> charAt (19, off)
+  'T' -> charAt (20, off)
+  'U' -> charAt (21, off)
+  'V' -> charAt (22, off)
+  'W' -> charAt (23, off)
+  'X' -> charAt (24, off)
+  'Y' -> charAt (25, off)
+  'Z' -> charAt (26, off)
+  '[' -> charAt (27, off)
   -- British Pound
-  ']' -> charAt (28, 1)
+  ']' -> charAt (28, off + 1)
   -- Up arrow
   -- Left arrow
-  ' ' -> charAt (0, 1)
-  '!' -> charAt (1, 1)
-  '"' -> charAt (2, 1)
-  '#' -> charAt (3, 1)
-  '$' -> charAt (4, 1)
-  '%' -> charAt (5, 1)
-  '&' -> charAt (6, 1)
-  '`' -> charAt (7, 1)
-  '(' -> charAt (8, 1)
-  ')' -> charAt (9, 1)
-  '*' -> charAt (10, 1)
-  '+' -> charAt (11, 1)
-  ',' -> charAt (12, 1)
-  '-' -> charAt (13, 1)
-  '.' -> charAt (14, 1)
-  '/' -> charAt (15, 1)
-  '0' -> charAt (16, 1)
-  '1' -> charAt (17, 1)
-  '2' -> charAt (18, 1)
-  '3' -> charAt (19, 1)
-  '4' -> charAt (20, 1)
-  '5' -> charAt (21, 1)
-  '6' -> charAt (22, 1)
-  '7' -> charAt (23, 1)
-  '8' -> charAt (24, 1)
-  '9' -> charAt (25, 1)
-  ':' -> charAt (26, 1)
-  ';' -> charAt (27, 1)
-  '<' -> charAt (28, 1)
-  '=' -> charAt (29, 1)
-  '>' -> charAt (30, 1)
-  '?' -> charAt (31, 1)
+  ' ' -> charAt (0, off + 1)
+  '!' -> charAt (1, off + 1)
+  '"' -> charAt (2, off + 1)
+  '#' -> charAt (3, off + 1)
+  '$' -> charAt (4, off + 1)
+  '%' -> charAt (5, off + 1)
+  '&' -> charAt (6, off + 1)
+  '\'' -> charAt (7, off + 1)
+  '(' -> charAt (8, off + 1)
+  ')' -> charAt (9, off + 1)
+  '*' -> charAt (10, off + 1)
+  '+' -> charAt (11, off + 1)
+  ',' -> charAt (12, off + 1)
+  '-' -> charAt (13, off + 1)
+  '.' -> charAt (14, off + 1)
+  '/' -> charAt (15, off + 1)
+  '0' -> charAt (16, off + 1)
+  '1' -> charAt (17, off + 1)
+  '2' -> charAt (18, off + 1)
+  '3' -> charAt (19, off + 1)
+  '4' -> charAt (20, off + 1)
+  '5' -> charAt (21, off + 1)
+  '6' -> charAt (22, off + 1)
+  '7' -> charAt (23, off + 1)
+  '8' -> charAt (24, off + 1)
+  '9' -> charAt (25, off + 1)
+  ':' -> charAt (26, off + 1)
+  ';' -> charAt (27, off + 1)
+  '<' -> charAt (28, off + 1)
+  '=' -> charAt (29, off + 1)
+  '>' -> charAt (30, off + 1)
+  '?' -> charAt (31, off + 1)
+
+enchi : String -> (Bool, Element)
+enchi s = foldl (\c (h, s) -> if c == '`' then (not h, s) else (h, s `beside` c64Char (if h then 4 else 0) c)) (False, empty) (String.toList s)
 
 c64 : String -> Form
-c64 s = zip (String.toList s) [0 .. String.length s] |> map (\(c, i) -> c64Char c |> move (toFloat i * 24 + 12, -12)) |> group
+c64 s = let (_, fs) = enchi s in fs |> toForm |> moveX ((widthOf fs |> toFloat) / 2)
 
-c64s : [String] -> [Form]
-c64s ss = zip ss [0 .. length ss] |> map (\(s, i) -> c64 s |> moveY (toFloat i * -24))
-
-equipment = Dict.fromList [(0, Sword), (1, Armor), (2, Shield), (3, ElvenCloak), (4, ElvenBoots), (5, RingOfRegeneration), (6, RingOfProtection)]
-
-equipAbbr : EquipmentClass -> String
-equipAbbr c = case c of
-  Sword -> "SWORD"
-  Armor -> "ARMOR"
-  Shield -> "SHIELD"
-  ElvenCloak -> "ELVN CLK"
-  ElvenBoots -> "ELVN BTS"
-  RingOfRegeneration -> "RING REG"
-  RingOfProtection -> "RING PROT"
+c64s : [String] -> Form
+c64s ss = zip ss [0 .. length ss] |> map (\(s, i) -> c64 s |> moveY (toFloat i * -24)) |> group
 
 bonusStr : Int -> String
 bonusStr n = if n == 0 then "" else "+" ++ show n
 
-eqBonus : GameState -> Int -> Int
-eqBonus s c = Dict.findWithDefault 0 c s.equipmentBonus
+equipStr : Equipment -> [String]
+equipStr q = let n = q.bonus in
+  if n == 0 && not q.isAlwaysEquipped then []
+  else [" " ++ q.abbr ++ " " ++ bonusStr n]
 
-isAlwaysEquipped : EquipmentClass -> Bool
-isAlwaysEquipped c = c == Sword || c == Armor || c == Shield
-
-equipStr : GameState -> Int -> [String]
-equipStr s i = let
-    n = eqBonus s i
-    c = Dict.findWithDefault Sword i equipment
-  in if n == 0 && not (isAlwaysEquipped c) then []
-     else [" " ++ equipAbbr c ++ " " ++ bonusStr n]
-
-consumables = Dict.fromList [(0, ScrollOfRescue), (1, PotionOfHealing), (2, PotionOfStrength)]
+consumables = [ScrollOfRescue, PotionOfHealing, PotionOfStrength]
 
 consumableAbbr : ConsumableClass -> String
 consumableAbbr c = case c of
@@ -683,13 +843,10 @@ consumableAbbr c = case c of
   PotionOfHealing -> "POT HEAL"
   PotionOfStrength -> "POT STRG"
 
-consCount : GameState -> Int -> Int
-consCount s c = Dict.findWithDefault 0 c s.consumableCount
+consStr : GameState -> ConsumableClass -> [String]
+consStr s c = let n = s.consumableCount c in if n == 0 then [] else ["  " ++ show n ++ " " ++ consumableAbbr c]
 
-consStr : GameState -> Int -> [String]
-consStr s c = let n = consCount s c in if n == 0 then [] else ["  " ++ show n ++ " " ++ consumableAbbr (Dict.findWithDefault ScrollOfRescue c consumables)]
-
-charData : GameState -> [Form]
+charData : GameState -> Form
 charData s = let t = s.stats in
   c64s ([s.name ++ " LVL " ++ show s.level,
   "STR " ++ show t.str ++ "   CON " ++ show t.con,
@@ -698,11 +855,17 @@ charData s = let t = s.stats in
   "HP " ++ show s.hp ++ "/" ++ show s.maxhp,
   "SU " ++ show s.su ++ "/" ++ show s.maxsu,
   "EX " ++ show s.exp,
-  "GD " ++ show s.gold] ++ concatMap (equipStr s) [0..6] ++ concatMap (consStr s) [0..2])
+  "GD " ++ show s.gold] ++ concatMap equipStr s.equipment ++ concatMap (consStr s) consumables)
+
+showPrompt : GameState -> Form
+showPrompt s = c64s s.prompt
 
 drawView : GameState -> Element
-drawView s = ((collage 960 720 [drawGameState s |> group |> move (-200, 110), group (charData s) |> move (100, 14 * 24)] |> color black) `above`
-  textify (actionMessage s) `above` textify (spellEffects s) `above` textify s.msg)
+drawView s = ((collage 960 720 [drawGameState s |> group |> move (-200, 110),
+  charData s |> move (100, 14 * 24),
+  showPrompt s |> move (-19 * 24, -6 * 24),
+  monsterStatus s] |> color black) `above`
+  textify (spellEffectsStr s) `above` textify s.msg)
 
 -- Program
 
