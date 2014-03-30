@@ -17,19 +17,22 @@ data Spell = AstralWalk
 
 type SpellEffect = {name : String, abbr : String, duration : Int}
 
-type RandomCtx = {clumsinessAroundPits : Float, itemDesirability : Float, sneakiness : Float, monsterLevel : Float, monsterPower : Float, monsterHealth : Float,
-  undeadFearOfLight : Float, sexiness : Float, possessiveness : Float, teleporterInstability : Float}
+type RandomCtx = {clumsinessAroundPits : Float, itemDesirability : Float, sneakiness : Float,
+  monsterLevel : Float, monsterPower : Float, monsterHealth : Float, undeadFearOfLight : Float,
+  sexiness : Float, possessiveness : Float, teleporterInstability : Float, likability : Float,
+  typeOfMagicItemsLyingAround : Float, monsterGenerosity : Float,
+  scrappiness : Float, focus : Float, muscleMemory : Float,
+  monsterScrappiness : Float, monsterFocus : Float, monsterMuscleMemory : Float,
+  hardiness : Float, monsterThirst : Float, monsterVileness : Float}
 
 data Command = ERROR | NORTH | EAST | SOUTH | WEST | UP | DOWN | STAY |
   FIGHT | CAST Spell | TICK | ROLL RandomCtx | CONTINUE
 
-type Monster = {name : String, img : Form, power : Int, level : Int, hp : Int}
+type Monster = {name : String, img : Form, power : Int, level : Int, hp : Int, hitBonus : Int, damageMultiplier : Int, isUndead : Bool, isVeryEvil : Bool, drainChance : Float, paralyzeChance : Float}
 
-data Action = WAITING | FIGHTING Monster | FALLING Int | RISING Int | TELEPORTING Int | RESTING | READING Int Form (GameState -> GameState)
+data Action = WAITING | FIGHTING Monster | FALLING Int | RISING Int | TELEPORTING Int | RESTING | BEING_DEAD
 
-data OnRoll = NoChange | ContinueWith (Float -> GameState -> GameState)
-
---data EquipmentClass = Sword | Armor | Shield | ElvenCloak | ElvenBoots | RingOfRegeneration | RingOfProtection
+data Continuation = Same | Next (GameState -> GameState)
 
 type Equipment = {name : String, abbr : String, bonus : Int, isAlwaysEquipped : Bool}
 
@@ -49,6 +52,8 @@ type GameState = {action : Action, pos : Position, name : String, level : Int,
   msg : String, msgTimer : Int,
   prompt : [String],
   idleTimer : Int,
+  delayTimer : Int,
+  delayContinuation : Continuation,
   rnd : RandomCtx
 }
 
@@ -82,19 +87,33 @@ type Glom = {n : Int, rnd : RandomCtx}
 
 randomGlom : Float -> Glom -> Glom
 randomGlom x {n, rnd} = case n of
-  0 -> {n = n + 1, rnd = {rnd | clumsinessAroundPits <- x}}
-  1 -> {n = n + 1, rnd = {rnd | itemDesirability <- x}}
-  2 -> {n = n + 1, rnd = {rnd | sneakiness <- x}}
-  3 -> {n = n + 1, rnd = {rnd | monsterLevel <- x}}
-  4 -> {n = n + 1, rnd = {rnd | monsterPower <- x}}
-  5 -> {n = n + 1, rnd = {rnd | monsterHealth <- x}}
-  6 -> {n = n + 1, rnd = {rnd | undeadFearOfLight <- x}}
-  7 -> {n = n + 1, rnd = {rnd | sexiness <- x}}
-  8 -> {n = n + 1, rnd = {rnd | possessiveness <- x}}
-  9 -> {n = 0, rnd = {rnd | teleporterInstability <- x}}
+  0  -> {n = n + 1, rnd = {rnd | clumsinessAroundPits <- x}}
+  1  -> {n = n + 1, rnd = {rnd | itemDesirability <- x}}
+  2  -> {n = n + 1, rnd = {rnd | sneakiness <- x}}
+  3  -> {n = n + 1, rnd = {rnd | monsterLevel <- x}}
+  4  -> {n = n + 1, rnd = {rnd | monsterPower <- x}}
+  5  -> {n = n + 1, rnd = {rnd | monsterHealth <- x}}
+  6  -> {n = n + 1, rnd = {rnd | undeadFearOfLight <- x}}
+  7  -> {n = n + 1, rnd = {rnd | sexiness <- x}}
+  8  -> {n = n + 1, rnd = {rnd | possessiveness <- x}}
+  9  -> {n = n + 1, rnd = {rnd | teleporterInstability <- x}}
+  10 -> {n = n + 1, rnd = {rnd | likability <- x}}
+  11 -> {n = n + 1, rnd = {rnd | monsterGenerosity <- x}}
+  12 -> {n = n + 1, rnd = {rnd | typeOfMagicItemsLyingAround <- x}}
+  13 -> {n = n + 1, rnd = {rnd | scrappiness <- x}}
+  14 -> {n = n + 1, rnd = {rnd | focus <- x}}
+  15 -> {n = n + 1, rnd = {rnd | muscleMemory <- x}}
+  16 -> {n = n + 1, rnd = {rnd | monsterScrappiness <- x}}
+  17 -> {n = n + 1, rnd = {rnd | monsterFocus <- x}}
+  18 -> {n = n + 1, rnd = {rnd | monsterMuscleMemory <- x}}
+  19 -> {n = n + 1, rnd = {rnd | hardiness <- x}}
+  20 -> {n = n + 1, rnd = {rnd | monsterThirst <- x}}
+  21 -> {n = 0, rnd = {rnd | monsterVileness <- x}}
 
 initRnd = {clumsinessAroundPits = 0.0, itemDesirability = 0.0, sneakiness = 0.0, monsterLevel = 0.0, monsterPower = 0.0, monsterHealth = 0.0,
-    undeadFearOfLight = 0.0, sexiness = 0.0, possessiveness = 0.0, teleporterInstability = 0.0}
+    undeadFearOfLight = 0.0, sexiness = 0.0, possessiveness = 0.0, teleporterInstability = 0.0, likability = 0.0, monsterGenerosity = 0.0, typeOfMagicItemsLyingAround = 0.0,
+    scrappiness = 0.0, focus = 0.0, muscleMemory = 0.0, monsterScrappiness = 0.0, monsterFocus = 0.0, monsterMuscleMemory = 0.0, hardiness = 0.0,
+    monsterThirst = 0.0, monsterVileness = 0.0}
 
 randomCommand : Glom -> Command
 randomCommand {n, rnd} = ROLL rnd
@@ -133,6 +152,7 @@ initState = {action = WAITING, pos = {x = 25, y = 13, z = 1},
     effect "Levitation" "LEVT" 0, effect "Invisibility" "INVS" 0, effect "Fear" "FEAR" 0, effect "Astral Walk" "ASTW" 0, effect "Time Stop" "TMST" 0,
     effect "Resurrection" "RESD" 0, effect "Drunk" "DRNK" 0],
   msg = "", msgTimer = 0, prompt = [], idleTimer = 50,
+  delayTimer = 0, delayContinuation = Same,
   rnd = initRnd} |> checkForTraps
 
 wbound : Int -> Int
@@ -228,14 +248,11 @@ promptStairway u d s = s |> clearPrompt
   |> prompt ("DO YOU WANT TO " ++ (if u then "GO `U`P, " else "") ++ (if d then "GO `D`OWN," else ""))
   |> prompt "OR `S`TAY ON THE SAME LEVEL?"
 
---roll : (Float -> GameState -> GameState) -> GameState -> GameState
---roll f s = {s | onRoll <- ContinueWith (\r s -> f r {s | onRoll <- NoChange})}
-
 checkForTraps : GameState -> GameState
-checkForTraps s = case (roomAt s.pos).feature of
+checkForTraps t = let s = t |> setAction WAITING in case (roomAt s.pos).feature of
   PIT        -> s |> clearPrompt
                   |> prompt "YOU SEE A PIT"
-                  |> if s.rnd.clumsinessAroundPits < 0.5 then setAction (FALLING 21) `andThen` prompt "YOU FALL IN!!" else setAction WAITING `andThen` prompt "YOU CAN GO `D`OWN OR TRAVEL ON"
+                  |> if s.rnd.clumsinessAroundPits < 0.5 then setAction (FALLING 21) `andThen` prompt "YOU FALL IN!!" else prompt "YOU CAN GO `D`OWN OR TRAVEL ON"
   ELEVATOR   -> {s | action <- RISING 21, prompt <- ["YOU FEEL HEAVY FOR A MOMENT"]}
   TELEPORTER -> {s | action <- TELEPORTING 21, prompt <- ["ZZAP!! YOU'VE BEEN TELEPORTED..."]}
   STAIRS_UP -> s |> promptStairway True False
@@ -243,29 +260,31 @@ checkForTraps s = case (roomAt s.pos).feature of
   STAIRS_DOWN -> s |> promptStairway False True
   _          -> s |> clearPrompt
 
-mc n i p u = {name = n, img = i, power = p, isUndead = u}
+mc : String -> Form -> Int -> Int -> Int -> Bool -> Bool -> Float -> Float -> Monster
+mc n i p h d u v dc pc = {name = n, img = i, power = p, hitBonus = h, damageMultiplier = d, isUndead = u, isVeryEvil = v, drainChance = dc, paralyzeChance = pc, level = 0, hp = 0}
 
+monsterClass : Int -> Monster
 monsterClass n = case n of
-  1 -> mc "GNOLL" gnoll 1 False 
-  2 -> mc "KOBOLD" kobold 2 False
-  3 -> mc "SKELETON" skeleton 3 True
-  4 -> mc "HOBBIT" hobbit 4 False
-  5 -> mc "ZOMBIE" zombie 5 True
-  6 -> mc "ORC" orc 6 False
-  7 -> mc "FIGHTER" fighter 7 False
-  8 -> mc "MUMMY" mummy 8 True
-  9 -> mc "ELF" elf 9 False
-  10 -> mc "GHOUL" ghoul 10 True
-  11 -> mc "DWARF" dwarf 11 False
-  12 -> mc "TROLL" troll 12 False
-  13 -> mc "WRAITH" wraith 13 True
-  14 -> mc "OGRE" ogre 14 False
-  15 -> mc "MINOTAUR" minotaur 15 False
-  16 -> mc "GIANT" giant 16 False
-  17 -> mc "SPECTER" specter 17 True
-  18 -> mc "VAMPIRE" vampire 18 True
-  19 -> mc "DEMON" demon 19 False
-  20 -> mc "DRAGON" dragon 20 False
+  1 -> mc "GNOLL" gnoll 1 0 1 False False 0 0
+  2 -> mc "KOBOLD" kobold 2 0 1 False False 0 0
+  3 -> mc "SKELETON" skeleton 3 0 1 True False 0 0
+  4 -> mc "HOBBIT" hobbit 4 0 1 False False 0 0
+  5 -> mc "ZOMBIE" zombie 5 0 1 True False 0 0
+  6 -> mc "ORC" orc 6 0 1 False False 0 0
+  7 -> mc "FIGHTER" fighter 7 0 1 False False 0 0
+  8 -> mc "MUMMY" mummy 8 0 1 True False 0 0
+  9 -> mc "ELF" elf 9 0 1 False False 0 0
+  10 -> mc "GHOUL" ghoul 10 0 1 True False 0 0.5
+  11 -> mc "DWARF" dwarf 11 0 1 False False 0 0
+  12 -> mc "TROLL" troll 12 0 1 False False 0 0
+  13 -> mc "WRAITH" wraith 13 0 1 True False 0.1 0
+  14 -> mc "OGRE" ogre 14 0 1 False False 0 0
+  15 -> mc "MINOTAUR" minotaur 15 0 1 False False 0 0
+  16 -> mc "GIANT" giant 16 0 1 False False 0 0
+  17 -> mc "SPECTER" specter 17 0 1 True True 0.2 0
+  18 -> mc "VAMPIRE" vampire 18 0 1 True True 0.3 0.3
+  19 -> mc "DEMON" demon 19 4 5 False True 0 0
+  20 -> mc "DRAGON" dragon 20 0 1 False False 0 0
 
 -- TODO: Check for invisibility, elven cloak effect, more monster classes, time stop
 -- monster stealing, monster gifting, initiative check, protection from evil
@@ -276,8 +295,8 @@ dn n r = floor (frac r * toFloat n + 1)
 chance : Float -> Float -> Bool
 chance f r = frac r < f
 
-after : Int -> Form -> (GameState -> GameState) -> GameState -> GameState
-after t i f = setAction (READING t i f)
+after : Int -> (GameState -> GameState) -> GameState -> GameState
+after t f s = {s | delayTimer <- t, delayContinuation <- Next f}
 
 fullHeal : GameState -> GameState
 fullHeal s = {s | hp <- s.maxhp}
@@ -297,16 +316,15 @@ hasAnythingToSteal s = any (\q -> q.bonus > 0) s.equipment
 steal : String -> GameState -> GameState
 steal n s = {s | equipment <- s.equipment |> map (\q -> if q.name == n then {q | bonus <- 0} else q)}
 
-at : Int -> [a] -> a
-at n s = drop n s |> head
-
-
 stealSomething : Form -> GameState -> GameState
 stealSomething f s = s |> let
     ss = stuffToSteal s
     n = floor (s.rnd.itemDesirability * toFloat (length ss))
-    q = at n ss
-  in prompt ("HE STEALS YOUR " ++ q.name) `andThen` steal q.name `andThen` after 30 f (setAction WAITING `andThen` checkForTraps)
+    q = ss |> nth n
+  in prompt ("HE STEALS YOUR " ++ q.name) `andThen` steal q.name `andThen` after 30 checkForTraps
+
+replaceItem : String -> Int -> GameState -> GameState
+replaceItem n b s = {s | equipment <- map (\q -> if q.name == n then {q | bonus <- b} else q) s.equipment}
 
 checkForEncounter : GameState -> GameState
 checkForEncounter s = s |> if s.rnd.sneakiness < 0.3 then
@@ -320,21 +338,36 @@ checkForEncounter s = s |> if s.rnd.sneakiness < 0.3 then
     else if (s |> hasEffect "Light") && c.isUndead && chance 0.2 s.rnd.undeadFearOfLight then
       checkForEncounter
     else
-      setAction (FIGHTING {name = c.name, img = c.img, power = c.power, level = l, hp = h})
+      setAction (FIGHTING {c | level <- l, hp <- h})
       `andThen` clearPrompt
        `andThen` prompt ("YOU HAVE ENCOUNTERED A LVL " ++ show l ++ " " ++ c.name)
         `andThen` (if (c.name == "ELF" && chance (0.04 * toFloat s.stats.chr) s.rnd.sexiness) || chance 0.02 s.rnd.sexiness then
               fullHeal
               `andThen` prompt ("THE " ++ c.name ++ " LIKES YOUR BODY")
               `andThen` prompt "HE HEALS YOU TO FULL STRENGTH"
-              `andThen` after 30 c.img (checkForTraps . setAction WAITING)
-            else if (c.name == "HOBBIT" && chance (1.0 - 0.05 * toFloat s.stats.dex) s.rnd.possessiveness) || chance 0.02 s.rnd.possessiveness then
+              `andThen` after 30 checkForTraps
+            else if (c.name == "HOBBIT" && chance (1.0 - 0.05 * toFloat s.stats.chr) s.rnd.possessiveness) || chance 0.02 s.rnd.possessiveness then
               prompt ("THE " ++ c.name ++ " MAKES A QUICK MOVE") `andThen`
                (if hasAnythingToSteal s then
                   stealSomething c.img
-                else prompt "YOU HAVE NOTHING HE WANTS TO STEAL!" `andThen` after 30 c.img (setAction WAITING `andThen` checkForTraps))
+                else prompt "YOU HAVE NOTHING HE WANTS TO STEAL!" `andThen` after 30 checkForTraps)
+            else if (c.name == "DRAGON" && dn 30 s.rnd.likability <= s.stats.chr) || chance 0.02 s.rnd.likability then
+              let
+                itemToReplace = s.equipment |> nth (floor (s.rnd.typeOfMagicItemsLyingAround * 7))
+              in
+                if itemToReplace.bonus < l then
+                  let
+                    maxUpgrade = l - itemToReplace.bonus
+                    actualBonus = itemToReplace.bonus + dn maxUpgrade s.rnd.monsterGenerosity
+                  in
+                    replaceItem itemToReplace.name actualBonus
+                    `andThen` prompt ("THE " ++ c.name ++ " LIKES YOU!")
+                    `andThen` prompt ("HE GIVES YOU A " ++ itemToReplace.name ++ " +" ++ show actualBonus)
+                    `andThen` after 30 checkForTraps
+                else
+                  prompt "`F`IGHT, `C`AST, OR `E`VADE:"
             else prompt "`F`IGHT, `C`AST, OR `E`VADE:")
-  else setAction WAITING `andThen` checkForTraps
+  else checkForTraps
 
 successfully : GameState -> GameState
 successfully = checkForEncounter . resetIdleTimer . regenerate . reduceSpellDurations
@@ -368,12 +401,6 @@ idle s = case s.action of
                    else s |> setAction (TELEPORTING (n - 1))
                           |> if n == 0 then travel (randomPos s.rnd.teleporterInstability) `andThen` setAction (TELEPORTING (n - 1)) else id
   RESTING       -> s |> clearPrompt
-  READING n i f -> if n == 0 then f s else {s | action <- READING (n - 1) i f}
-
-isFighting : GameState -> Bool
-isFighting s = case s.action of
-  FIGHTING _ -> True
-  _ -> False
 
 setAction : Action -> GameState -> GameState
 setAction a s = {s | action <- a}
@@ -387,37 +414,119 @@ prompt m s = {s | prompt <- s.prompt ++ [m]}
 clearPrompt : GameState -> GameState
 clearPrompt s = {s | prompt <- []}
 
---fight : GameState -> GameState
---fight s = s |> clearPrompt
+reduceDelayTimer : GameState -> GameState
+reduceDelayTimer s = if s.delayTimer > 1 then {s | delayTimer <- s.delayTimer - 1}
+  else if s.delayTimer == 1 then case s.delayContinuation of
+    Same -> s
+    Next f -> f {s | delayTimer <- 0}
+  else s
+
+isNotDelayed : GameState -> Bool
+isNotDelayed s = s.delayTimer <= 0
+
+gainExp : Int -> GameState -> GameState
+gainExp x s = {s | exp <- s.exp + x} |> prompt ("YOU GAIN " ++ show x ++ " EXPERIENCE POINTS")
+
+clearEffect : String -> GameState -> GameState
+clearEffect n s = {s | effects <- map (\f -> if f.name == n then {f | duration <- 0}  else f) s.effects}
+
+updateCon : Int -> Stats -> Stats
+updateCon n s = {s | con <- n}
+
+resurrect : GameState -> GameState
+resurrect s = let s2 = {s | stats <- updateCon (s.stats.con - 1) s.stats} |> clearEffect "RESURRECTION" |> clearPrompt |> prompt "RESURRECTION" in
+  if chance (toFloat s2.stats.con * 0.06) s.rnd.hardiness then
+    s2 |> prompt "IT WORKS!" |> fullHeal |> after 30 checkForTraps
+  else
+    s2 |> prompt "IT DOESN'T WORK!" |> after 30 (setAction BEING_DEAD)
+
+takeDamage : Int -> GameState -> GameState
+takeDamage d s = let
+    h = s.hp - d
+    s2 = {s | hp <- s.hp - d}
+  in
+    if h < 1 then
+      s2 |> prompt "YOU DIED!!" `andThen` after 30 (if hasEffect "RESURRECTION" s then resurrect else setAction BEING_DEAD)
+    else s2 |> after 15 (clearPrompt `andThen` prompt "`F`IGHT, `C`AST, OR `E`VADE:")
+
+opponentAttacks : GameState -> GameState
+opponentAttacks s = case s.action of
+  FIGHTING m -> let
+    hitRoll = floor (s.rnd.monsterScrappiness * 20) + m.level - equipmentBonus "ARMOR" s - equipmentBonus "SHIELD" s + m.hitBonus
+      - if m.isVeryEvil && hasEffect "PROTECTION FROM EVIL" s then 6 else 0
+  in
+  if hitRoll < 10 then s |> prompt "IT MISSED..." |> after 15 (clearPrompt `andThen` prompt "`F`IGHT, `C`AST, OR `E`VADE:")
+  else let
+    damageRoll = floor ((s.rnd.monsterFocus * 8 + s.rnd.monsterMuscleMemory * toFloat m.level * 2 + 1) * toFloat m.damageMultiplier)
+    drain = chance m.drainChance s.rnd.monsterThirst
+    paralyze = chance m.paralyzeChance s.rnd.monsterVileness
+  in
+    s |> prompt ("IT DOES " ++ show damageRoll ++ " POINTS DAMAGE")
+      |> takeDamage damageRoll
+  _ -> s
+
+damageOpponent : Int -> GameState -> GameState
+damageOpponent d s = case s.action of
+  FIGHTING m -> let
+    mh = m.hp - d
+    exp = m.level * m.power * 10
+    s2 = s |> prompt ("YOU DO " ++ show d ++ " POINTS DAMAGE")
+  in
+    if mh <= 0 then
+      s2 |> prompt "IT DIED..."
+         |> gainExp exp
+         |> after 30 (clearPrompt `andThen` checkForTraps)
+    else
+      s2 |> opponentAttacks
+  _ -> s
+
+fight : GameState -> GameState
+fight s = case s.action of
+  FIGHTING m -> let
+    s2 = s |> clearPrompt
+    hitRoll = floor (s2.rnd.scrappiness * 20) + s2.level + equipmentBonus "SWORD" s2 + s2.stats.str `div` 2 + if hasEffect "STRENGTH" s2 then 4 else 0
+  in
+    if hitRoll < 10 then
+      s2 |> prompt "YOU MISSED..." |> opponentAttacks
+    else
+      let
+        damageRoll = floor (s2.rnd.focus * 8 + s2.rnd.muscleMemory * toFloat s2.level * 2 + toFloat (equipmentBonus "SWORD" s2) + (if hasEffect "STRENGTH" s2 then 5 else 0) + 1)
+      in
+        s2 |> damageOpponent damageRoll
+  _ -> s
 
 update : Command -> GameState -> GameState
 update c s = case c of
   ERROR  -> wtf s
-  NORTH  -> if s |> canMoveNorth
+  NORTH  -> if canMoveNorth s && isNotDelayed s
             then travel northOf s |> withMessage "North" |> successfully
             else wtf s
-  EAST   -> if s |> canMoveEast
+  EAST   -> if canMoveEast s && isNotDelayed s
             then travel eastOf s |> withMessage "East" |> successfully
             else wtf s
-  SOUTH  -> if s |> canMoveSouth
+  SOUTH  -> if canMoveSouth s && isNotDelayed s
             then travel southOf s |> withMessage "South" |> successfully
             else wtf s
-  WEST   -> if s |> canMoveWest
+  WEST   -> if canMoveWest s && isNotDelayed s
             then travel westOf s |> withMessage "West" |> successfully
             else wtf s
-  UP     -> if s |> canMoveUp
-            then travel topOf s |> (if s.pos.z == 1 then setAction RESTING else successfully . withMessage "Up")
+  UP     -> if canMoveUp s && isNotDelayed s
+            then travel topOf s |> (if s.pos.z == 1 then fullHeal `andThen` setAction RESTING else successfully . withMessage "Up")
             else wtf s
-  DOWN   -> if s |> canMoveDown
+  DOWN   -> if canMoveDown s && isNotDelayed s
             then travel bottomOf s |> withMessage "Down" |> successfully
             else wtf s
-  STAY   -> s |> withMessage "Stay" |> successfully
-  FIGHT  -> if s |> isFighting then s |> clearPrompt |> setAction WAITING |> checkForTraps |> withMessage "You killed it!" |> resetIdleTimer
+  STAY   -> if s.action == WAITING && isNotDelayed s
+            then s |> withMessage "Stay" |> successfully
             else wtf s
-  CAST a -> if s |> canCast a then increaseDuration "Astral Walk" 10 s |> withMessage "Cast" |> resetIdleTimer
+  FIGHT  -> if isNotDelayed s
+            then fight s |> resetIdleTimer
+            else wtf s
+  CAST a -> if canCast a s && isNotDelayed s
+            then increaseDuration "Astral Walk" 10 s |> withMessage "Cast" |> resetIdleTimer
             else wtf s
   CONTINUE -> if s.action == RESTING then s |> travel bottomOf |> setAction WAITING |> successfully else s
-  TICK   -> reduceMessageTimer (idle s)
+  TICK   -> reduceDelayTimer (reduceMessageTimer (idle s))
   ROLL ctx -> {s | rnd <- ctx}
 
 stateSignal : Signal GameState
@@ -528,20 +637,20 @@ cube = charForm "cubeb.png" |> move (-9 * zoom, 10 * zoom)
 throne = spriteForm "throneb.png" |> move (-8 * zoom, 16 * zoom)
 box = charForm "boxb.png" |> move (-9 * zoom, 9 * zoom)
 
-gnoll = ghoul
-kobold = ghoul
+gnoll = kobold
+kobold = spriteForm "kobold.png" |> move (-8 * zoom, 8 * zoom)
 skeleton = ghoul
 hobbit = dwarf
 zombie = ghoul
-orc = dwarf
+orc = kobold
 fighter = dwarf
 mummy = ghoul
 elf = dwarf
-troll = ghoul
+troll = spriteForm "troll.png" |> move (-8 * zoom, 8 * zoom)
 wraith = ghoul
-ogre = dwarf
+ogre = troll
 minotaur = dwarf
-giant = dwarf
+giant = troll
 specter = ghoul
 vampire = ghoul
 demon = ghoul
@@ -704,7 +813,6 @@ drawAction s = case s.action of
     hero |> moveY (toFloat (zoom * (21 - n)))]
   TELEPORTING n -> [hero, rect 800 600 |> filled (rgba 0 0 0 ((21 - abs (toFloat n)) / 21))]
   FIGHTING m -> [m.img, hero]
-  READING n i f -> [i, hero]
   _ -> (roomAt s.pos |> .feature |> featureSymbol) ++ [hero]
 
 adjectives = ["SALTY", "BOLD", "LOUD", "OLD", "GOODLY", "WORTHY", "LOFTY", "FINE", "ROCKY", "AGED"]
