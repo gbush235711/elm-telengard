@@ -5,13 +5,11 @@ import Text
 import Random
 import Dict (Dict)
 import Dict
+import Graphics
+import Dungeon
+import C64
 
 -- Abstract Model
-
-data Boundary = EMPTY | DOOR | WALL
-
-data Feature = NONE | ELEVATOR | PIT | TELEPORTER | STAIRS_UP | STAIRS_DOWN
-  | STAIRS_BOTH | ALTAR | FOUNTAIN | CUBE | THRONE | BOX
 
 data Spell = AstralWalk
 
@@ -38,18 +36,16 @@ treasures = [treasure "REFUSE" refuse 0 1,
 data Action = WAITING | FIGHTING Monster | FALLING Int | RISING Int | TELEPORTING Int | RESTING | BEING_DEAD |
   LOOTING_FREE Treasure Bool | LOOTING_CHEST Int Bool | LOOTING_ITEM Item Int Bool
 
-data Continuation = Same | Next (GameState -> GameState)
-
 type Item = {name : String, abbr : String, bonus : Int, isAlwaysEquipped : Bool, isConsumable : Bool}
-
-type Room = {top : Boundary, left : Boundary, feature : Feature}
-
-type Position = {x : Int, y : Int, z : Int}
 
 type Stats = {str : Int, int : Int, wis : Int, con : Int, dex : Int, chr : Int}
 
-type GameState = {action : Action, pos : Position, name : String, level : Int,
-  stats : Stats, hp : Int, maxhp : Int, su : Int, maxsu : Int, exp : Int, gold : Int,
+type Transition = GameState -> GameState
+
+data Continuation = Same | Next Transition
+
+type GameState = {action : Action, pos : Dungeon.Position, name : String, level : Int,
+  stats : Stats, hp : Int, maxhp : Int, su : Int, maxsu : Int, exp : Int, gold : Int, totalGold : Int,
   items : [Item],
   effects : [SpellEffect],
   msg : String, msgTimer : Int,
@@ -58,13 +54,6 @@ type GameState = {action : Action, pos : Position, name : String, level : Int,
   delayTimer : Int,
   delayContinuation : Continuation,
   rnd : [Float]}
-
-dungeonWidth = 200
-dungeonHeight = 200
-dungeonDepth = 50
-
-eastEdge = dungeonWidth + 1
-southEdge = dungeonHeight + 1
 
 -- Control : Movement commands
 
@@ -97,7 +86,7 @@ item n a ae ic b = {name = n, abbr = a, isAlwaysEquipped = ae, isConsumable = ic
 initStats = {str = 9, int = 9, wis = 9, con = 9, dex = 9, chr = 9}
 
 initState = {action = WAITING, pos = {x = 25, y = 13, z = 1},
-  name = "STABULO", level = 1, stats = initStats, hp = 9, maxhp = 9, su = 1, maxsu = 1, exp = 0, gold = 0,
+  name = "STABULO", level = 1, stats = initStats, hp = 9, maxhp = 9, su = 1, maxsu = 1, exp = 0, gold = 0, totalGold = 0,
 
   items = [
     item "SWORD" "SWORD" True False 99,
@@ -128,34 +117,7 @@ initState = {action = WAITING, pos = {x = 25, y = 13, z = 1},
   delayTimer = 0, delayContinuation = Same,
   rnd = []} |> checkForTraps
 
-wbound : Int -> Int
-wbound x = clamp 1 dungeonWidth x
-
-hbound : Int -> Int
-hbound x = clamp 1 dungeonHeight x
-
-dbound : Int -> Int
-dbound x = clamp 1 dungeonDepth x
-
-northOf : Position -> Position
-northOf p = {p | y <- p.y - 1}
-
-southOf : Position -> Position
-southOf p = {p | y <- p.y + 1}
-
-westOf : Position -> Position
-westOf p = {p | x <- p.x - 1}
-
-eastOf : Position -> Position
-eastOf p = {p | x <- p.x + 1}
-
-topOf : Position -> Position
-topOf p = {p | z <- p.z - 1}
-
-bottomOf : Position -> Position
-bottomOf p = {p | z <- p.z + 1}
-
-travel : (Position -> Position) -> GameState -> GameState
+travel : (Dungeon.Position -> Dungeon.Position) -> Transition
 travel f s = {s | pos <- f s.pos}
 
 hasEffect : String -> GameState -> Bool
@@ -163,41 +125,35 @@ hasEffect n s = s.effects |> any (\sf -> sf.name == n && sf.duration > 0)
 
 canMoveNorth : GameState -> Bool
 canMoveNorth s = s.action == WAITING && s.pos.y > 1 &&
-  ((s |> hasEffect "ASTRAL WALK") || (roomAt s.pos).top /= WALL)
+  ((s |> hasEffect "ASTRAL WALK") || (Dungeon.roomAt s.pos).top /= Dungeon.WALL)
 
 canMoveWest : GameState -> Bool
 canMoveWest s = s.action == WAITING && s.pos.x > 1 &&
-  ((s |> hasEffect "ASTRAL WALK") || (roomAt s.pos).left /= WALL)
+  ((s |> hasEffect "ASTRAL WALK") || (Dungeon.roomAt s.pos).left /= Dungeon.WALL)
 
 canMoveSouth : GameState -> Bool
 canMoveSouth s = s.action == WAITING && s.pos.y < 200 &&
-  ((s |> hasEffect "ASTRAL WALK") || (roomAt (southOf s.pos)).top /= WALL)
+  ((s |> hasEffect "ASTRAL WALK") || (Dungeon.roomAt (Dungeon.southOf s.pos)).top /= Dungeon.WALL)
 
 canMoveEast : GameState -> Bool
 canMoveEast s = s.action == WAITING && s.pos.x < 200 &&
-  ((s |> hasEffect "ASTRAL WALK") || (roomAt (eastOf s.pos)).left /= WALL)
-
-canClimb : Feature -> Bool
-canClimb f = f == STAIRS_UP || f == STAIRS_BOTH
-
-canDescend : Feature -> Bool
-canDescend f = f == STAIRS_DOWN || f == STAIRS_BOTH || f == PIT
+  ((s |> hasEffect "ASTRAL WALK") || (Dungeon.roomAt (Dungeon.eastOf s.pos)).left /= Dungeon.WALL)
 
 canMoveUp : GameState -> Bool
 canMoveUp s = s.action == WAITING &&
-  canClimb ((roomAt s.pos).feature)
+  Dungeon.canClimb (Dungeon.roomAt s.pos).feature
 
 canMoveDown : GameState -> Bool
 canMoveDown s = s.action == WAITING && s.pos.z < 50 &&
-  canDescend ((roomAt s.pos).feature)
+  Dungeon.canDescend (Dungeon.roomAt s.pos).feature
 
-withMessage : String -> GameState -> GameState
+withMessage : String -> Transition
 withMessage m s = {s | msg <- m, msgTimer <- 10}
 
-wtf : GameState -> GameState
+wtf : Transition
 wtf s = s |> withMessage "No"
 
-reduceSpellDurations : GameState -> GameState
+reduceSpellDurations : Transition
 reduceSpellDurations s = {s | effects <- map (\sf -> {sf | duration <- max 0 (sf.duration - 1)}) s.effects}
 
 findWithDefault : a -> (a -> Bool) -> [a] -> a
@@ -208,33 +164,33 @@ findWithDefault d p s = case s of
 itemBonus : String -> GameState -> Int
 itemBonus n s = findWithDefault {name = "", abbr = "", isAlwaysEquipped = False, isConsumable = False, bonus = 0} (\q -> q.name == n) s.items |> .bonus
 
-regenerate : GameState -> GameState
+regenerate : Transition
 regenerate s = {s | hp <- min (s.hp + itemBonus "RING OF REGENERATION" s) s.maxhp}
 
-resetIdleTimer : GameState -> GameState
+resetIdleTimer : Transition
 resetIdleTimer s = {s | idleTimer <- 50}
 
-promptStairway : Bool -> Bool -> GameState -> GameState
+promptStairway : Bool -> Bool -> Transition
 promptStairway u d s = s |> clearPrompt
   |> prompt "YOU HAVE FOUND A STAIRWAY"
   |> (if u && s.pos.z == 1 then prompt "YOU SEE `LIGHT` ABOVE" else id)
   |> prompt ("DO YOU WANT TO " ++ (if u then "GO `U`P, " else "") ++ (if d then "GO `D`OWN," else ""))
   |> prompt "OR `S`TAY ON THE SAME LEVEL?"
 
-roll : (Float -> GameState -> GameState) -> GameState -> GameState
+roll : (Float -> Transition) -> Transition
 roll f s = f (head s.rnd) {s | rnd <- tail s.rnd}
 
-checkForTraps : GameState -> GameState
-checkForTraps t = let s = t |> setAction WAITING in case (roomAt s.pos).feature of
-  PIT        -> s |> clearPrompt
+checkForTraps : Transition
+checkForTraps t = let s = t |> setAction WAITING in case (Dungeon.roomAt s.pos).feature of
+  Dungeon.PIT        -> s |> clearPrompt
                   |> prompt "YOU SEE A PIT"
                   |> roll (\r -> if r < 0.5 then setAction (FALLING 21) `andThen` prompt "YOU FALL IN!!"
                     else prompt "YOU CAN GO `D`OWN OR TRAVEL ON")
-  ELEVATOR   -> {s | action <- RISING 21, prompt <- ["YOU FEEL HEAVY FOR A MOMENT"]}
-  TELEPORTER -> {s | action <- TELEPORTING 21, prompt <- ["ZZAP!! YOU'VE BEEN TELEPORTED..."]}
-  STAIRS_UP -> s |> promptStairway True False
-  STAIRS_BOTH -> s |> promptStairway True True
-  STAIRS_DOWN -> s |> promptStairway False True
+  Dungeon.ELEVATOR   -> {s | action <- RISING 21, prompt <- ["YOU FEEL HEAVY FOR A MOMENT"]}
+  Dungeon.TELEPORTER -> {s | action <- TELEPORTING 21, prompt <- ["ZZAP!! YOU'VE BEEN TELEPORTED..."]}
+  Dungeon.STAIRS_UP -> s |> promptStairway True False
+  Dungeon.STAIRS_BOTH -> s |> promptStairway True True
+  Dungeon.STAIRS_DOWN -> s |> promptStairway False True
   _          -> s |> clearPrompt
 
 mc : String -> Form -> Int -> Int -> Int -> Bool -> Bool -> Float -> Float -> Monster
@@ -268,15 +224,12 @@ monsterClass n = case n of
 -- initiative check
 
 dn : Int -> Float -> Int
-dn n r = floor (frac r * toFloat n + 1)
+dn n r = floor (r * toFloat n + 1)
 
-chance : Float -> Float -> Bool
-chance f r = frac r < f
-
-after : Int -> (GameState -> GameState) -> GameState -> GameState
+after : Int -> Transition -> Transition
 after t f s = {s | delayTimer <- t, delayContinuation <- Next f}
 
-fullHeal : GameState -> GameState
+fullHeal : Transition
 fullHeal s = {s | hp <- s.maxhp}
 
 andThen : (a -> b) -> (b -> c) -> a -> c
@@ -288,11 +241,11 @@ stuffToSteal s = filter (\q -> q.bonus > 0) s.items
 hasAnythingToSteal : GameState -> Bool
 hasAnythingToSteal s = any (\q -> q.bonus > 0) s.items
 
-steal : String -> GameState -> GameState
+steal : String -> Transition
 steal n s = {s | items <- s.items |> map (\q -> if q.name == n then
   {q | bonus <- if q.isConsumable then q.bonus - 1 else 0} else q)}
 
-stealSomething : Form -> GameState -> GameState
+stealSomething : Form -> Transition
 stealSomething f s = s |> roll (\r -> let
     ss = stuffToSteal s
     n = floor (r * toFloat (length ss))
@@ -300,18 +253,18 @@ stealSomething f s = s |> roll (\r -> let
   in prompt ("HE STEALS YOUR " ++ q.name) `andThen` steal q.name
     `andThen` after 20 checkForTraps)
 
-replaceItem : String -> Int -> GameState -> GameState
+replaceItem : String -> Int -> Transition
 replaceItem n b s = {s | items <- map (\q -> if q.name == n then {q | bonus <- b} else q) s.items}
 
 roll10 : (Float -> Float -> Float -> Float -> Float -> Float -> Float -> Float ->
-  Float -> Float -> GameState -> GameState) -> GameState -> GameState
+  Float -> Float -> Transition) -> Transition
 roll10 f = roll (\ra -> roll (\rb -> roll (\rc -> roll (\rd -> roll (\re -> roll (\rf ->
   roll (\rg -> roll (\rh -> roll (\ri -> roll (\rj -> f ra rb rc rd re rf rg rh ri rj))))))))))
 
-checkForEncounter : GameState -> GameState
-checkForEncounter s = s |> roll10 (\sneakiness monsterPower monsterLevel monsterHealth undeadFearOfLight
+checkForEncounter : Transition
+checkForEncounter s = s |> roll (\quiet -> roll10 (\sneakiness monsterPower monsterLevel monsterHealth undeadCourage
   sexiness possessiveness likability typeOfMagicItemsLyingAround monsterGenerosity ->
-  if sneakiness < 0.3 then
+  if sneakiness < 0.3  && (not (hasEffect "INVISIBILITY" s) || quiet < 0.2) then
   let
     c = monsterClass (dn 20 monsterPower)
     l = floor ((monsterLevel ^ 1.5) * (toFloat s.pos.z * 2 + 2) + 1)
@@ -319,23 +272,23 @@ checkForEncounter s = s |> roll10 (\sneakiness monsterPower monsterLevel monster
   in
     if (s |> hasEffect "FEAR") && c.power < 5 then
       checkForEncounter
-    else if (s |> hasEffect "LIGHT") && c.isUndead && chance 0.2 undeadFearOfLight then
+    else if (s |> hasEffect "LIGHT") && c.isUndead && undeadCourage < 0.2 then
       checkForEncounter
     else
       setAction (FIGHTING {c | level <- l, hp <- h})
       `andThen` clearPrompt
        `andThen` prompt ("YOU HAVE ENCOUNTERED A LVL " ++ show l ++ " " ++ c.name)
-        `andThen` (if (c.name == "ELF" && chance (0.04 * toFloat s.stats.chr) sexiness) || chance 0.02 sexiness then
+        `andThen` (if (c.name == "ELF" && sexiness < 0.04 * toFloat s.stats.chr) || sexiness < 0.02 then
               fullHeal
               `andThen` prompt ("THE " ++ c.name ++ " LIKES YOUR BODY")
               `andThen` prompt "HE HEALS YOU TO FULL STRENGTH"
               `andThen` after 20 (checkForLoot l)
-            else if (c.name == "HOBBIT" && chance (1.0 - 0.05 * toFloat s.stats.chr) possessiveness) || chance 0.02 possessiveness then
+            else if (c.name == "HOBBIT" && possessiveness < 1.0 - 0.05 * toFloat s.stats.chr) || possessiveness < 0.02 then
               prompt ("THE " ++ c.name ++ " MAKES A QUICK MOVE") `andThen`
                (if hasAnythingToSteal s then
                   stealSomething c.img
                 else prompt "YOU HAVE NOTHING HE WANTS TO STEAL!" `andThen` after 20 (checkForLoot l))
-            else if (c.name == "DRAGON" && dn 30 likability <= s.stats.chr) || chance 0.02 likability then
+            else if (c.name == "DRAGON" && dn 30 likability <= s.stats.chr) || likability < 0.02 then
               let
                 itemToReplace = s.items |> nth (floor (typeOfMagicItemsLyingAround * 7))
               in
@@ -351,57 +304,63 @@ checkForEncounter s = s |> roll10 (\sneakiness monsterPower monsterLevel monster
                 else
                   prompt "`F`IGHT, `C`AST, OR `E`VADE:"
             else prompt "`F`IGHT, `C`AST, OR `E`VADE:")
-  else checkForLoot s.pos.z)
+  else checkForLoot s.pos.z))
 
-successfully : GameState -> GameState
+successfully : Transition
 successfully = checkForEncounter . resetIdleTimer . regenerate . reduceSpellDurations
 
 canCast : Spell -> GameState -> Bool
 canCast a s = s.pos.z > 0
 
-reduceMessageTimer : GameState -> GameState
+reduceMessageTimer : Transition
 reduceMessageTimer s = if s.msgTimer == 1 then {s | msgTimer <- 0, msg <- ""}
   else if s.msgTimer > 1 then {s | msgTimer <- s.msgTimer - 1}
   else s
 
-randomPos : Float -> Position -> Position
-randomPos r p = let
-    xr = r * dungeonWidth
-    yr = frac(xr) * dungeonHeight
-  in {x = floor xr + 1, y = floor yr + 1, z = p.z}
+teleportFrom : Dungeon.Position -> Dungeon.Position
+teleportFrom {x, y, z} = let
+    zz = case (x + y) `mod` 4 of
+      0 -> z - 1
+      1 -> z + 0
+      2 -> z + 1
+      3 -> z + 2
+    xx = x + zz * 8 + y * 13
+    yy = y + zz * 6 + xx * 17
+  in {x = xx `mod` Dungeon.width, y = yy `mod` Dungeon.height, z = Dungeon.dbound zz}
 
+teleport : Transition
+teleport s = let ss = {s | pos <- teleportFrom s.pos} in ss |> roll (\r -> if r < 0.2 then teleport else id)
 
-idle : GameState -> GameState
+idle : Transition
 idle s = case s.action of
   WAITING       -> if s.pos.z > 0 && s.idleTimer <= 1 then resetIdleTimer s |> withMessage "Stay" |> successfully
                    else {s | idleTimer <- s.idleTimer - 1}
   FIGHTING    _ -> if s.idleTimer <= 1 then resetIdleTimer s |> withMessage "Wait"
                    else {s | idleTimer <- s.idleTimer - 1}
-  FALLING     n -> if n == 0 then {s | action <- WAITING, prompt <- []} |> travel bottomOf |> successfully
+  FALLING     n -> if n == 0 then {s | action <- WAITING, prompt <- []} |> travel Dungeon.bottomOf |> successfully
                    else {s | action <- FALLING (n - 1)}
-  RISING      n -> if n == 0 then {s | action <- WAITING, prompt <- []} |> travel topOf |> successfully
+  RISING      n -> if n == 0 then {s | action <- WAITING, prompt <- []} |> travel Dungeon.topOf |> successfully
                    else {s | action <- RISING (n - 1)}
   TELEPORTING n -> if n == -21 then {s | action <- WAITING, prompt <- []} |> successfully
                    else s |> setAction (TELEPORTING (n - 1))
-                          |> if n == 0 then roll (\r -> travel (randomPos r) `andThen` setAction (TELEPORTING (n - 1)))
+                          |> if n == 0 then setAction (TELEPORTING (n - 1)) `andThen` teleport
                              else id
-  RESTING       -> s |> clearPrompt
   _             -> s
 
-setAction : Action -> GameState -> GameState
+setAction : Action -> Transition
 setAction a s = {s | action <- a}
 
-increaseDuration : String -> Int -> GameState -> GameState
+increaseDuration : String -> Int -> Transition
 increaseDuration n t s = {s | effects <-
   map (\sf -> {sf | duration <- if sf.name == n then sf.duration + t else sf.duration}) s.effects}
 
-prompt : String -> GameState -> GameState
+prompt : String -> Transition
 prompt m s = {s | prompt <- s.prompt ++ [m]}
 
-clearPrompt : GameState -> GameState
+clearPrompt : Transition
 clearPrompt s = {s | prompt <- []}
 
-reduceDelayTimer : GameState -> GameState
+reduceDelayTimer : Transition
 reduceDelayTimer s = if s.delayTimer > 1 then {s | delayTimer <- s.delayTimer - 1}
   else if s.delayTimer == 1 then case s.delayContinuation of
     Same -> s
@@ -411,19 +370,19 @@ reduceDelayTimer s = if s.delayTimer > 1 then {s | delayTimer <- s.delayTimer - 
 isNotDelayed : GameState -> Bool
 isNotDelayed s = s.delayTimer <= 0
 
-gainExp : Int -> GameState -> GameState
-gainExp x s = {s | exp <- s.exp + x} |> prompt ("YOU GAIN " ++ show x ++ " EXPERIENCE POINTS")
+gainExp : Int -> Transition
+gainExp x s = {s | exp <- s.exp + x}
 
-clearEffect : String -> GameState -> GameState
+clearEffect : String -> Transition
 clearEffect n s = {s | effects <- map (\f -> if f.name == n then {f | duration <- 0}  else f) s.effects}
 
 updateCon : Int -> Stats -> Stats
 updateCon n s = {s | con <- n}
 
-when : (GameState -> GameState) -> Bool -> GameState -> GameState
+when : Transition -> Bool -> Transition
 when t c = if c then t else id
 
-checkForItem : Int -> Bool -> GameState -> GameState
+checkForItem : Int -> Bool -> Transition
 checkForItem ofLvl trapped s = s |> roll5 (\stuffLyingAround quality _ _ _ -> let
       q = s.items |> nth (floor (10 * stuffLyingAround))
       lvl = floor (quality ^ 0.5 * (toFloat ofLvl + 1) + 1)
@@ -436,36 +395,36 @@ checkForItem ofLvl trapped s = s |> roll5 (\stuffLyingAround quality _ _ _ -> le
 setLevel : Int -> Treasure -> Treasure
 setLevel n t = {t | level <- n}
 
-checkForLoot : Int -> GameState -> GameState
+checkForLoot : Int -> Transition
 checkForLoot ofLvl s = s |> clearPrompt |>
   roll10 (\attentionToDetail traptitude looseChange greed premonition piracy _ _ _ _ ->
-  if chance 0.2 attentionToDetail then
-    let trapped = chance 0.15 traptitude in
-    if chance 0.3 looseChange then
+  if attentionToDetail < 0.2 then
+    let trapped = traptitude < 0.15 in
+    if looseChange < 0.3 then
       let t = treasures |> nth (floor (5 * greed)) |> setLevel ofLvl in
         prompt ("YOU SEE SOME " ++ t.name)
         `andThen` prompt "PRESS <RET> TO PICK UP:"
-        `andThen` (prompt "YOU DETECT TRAPS!" `when` (trapped && hasEffect "DETECT TRAPS" s && chance 0.9 premonition))
+        `andThen` (prompt "YOU DETECT TRAPS!" `when` (trapped && hasEffect "DETECT TRAPS" s && premonition < 0.9))
         `andThen` setAction (LOOTING_FREE t trapped)
-    else if chance 0.5 piracy then
+    else if piracy < 0.5 then
       prompt "YOU HAVE FOUND A TREASURE CHEST!!"
-      `andThen` (prompt "YOU DETECT TRAPS!" `when` (trapped && hasEffect "DETECT TRAPS" s && chance 0.9 premonition))
+      `andThen` (prompt "YOU DETECT TRAPS!" `when` (trapped && hasEffect "DETECT TRAPS" s && premonition < 0.9))
       `andThen` prompt "<RET> TO OPEN IT:"
       `andThen` setAction (LOOTING_CHEST ofLvl trapped)
     else checkForItem ofLvl trapped
   else checkForTraps)
 
-resurrect : GameState -> GameState
+resurrect : Transition
 resurrect s = let
     s2 = {s | stats <- updateCon (s.stats.con - 1) s.stats}
          |> clearEffect "RESURRECTION" |> clearPrompt |> prompt "RESURRECTION"
   in
-    s2 |> roll (\r -> if chance (toFloat s2.stats.con * 0.06) r then
+    s2 |> roll (\r -> if r < toFloat s2.stats.con * 0.06 then
       prompt "IT WORKS!" `andThen` fullHeal `andThen` after 20 (checkForLoot s.pos.z)
     else
       prompt "IT DOESN'T WORK!" `andThen` after 20 (setAction BEING_DEAD))
 
-takeDamage : Int -> (GameState -> GameState) -> GameState -> GameState
+takeDamage : Int -> Transition -> Transition
 takeDamage d f s = let
     h = s.hp - d
     s2 = {s | hp <- s.hp - d}
@@ -475,10 +434,10 @@ takeDamage d f s = let
         after 20 (if hasEffect "RESURRECTION" s then resurrect else setAction BEING_DEAD)
     else s2 |> f
 
-roll5 : (Float -> Float -> Float -> Float -> Float -> GameState -> GameState) -> GameState -> GameState
+roll5 : (Float -> Float -> Float -> Float -> Float -> Transition) -> Transition
 roll5 f = roll (\a -> roll (\b -> roll (\c -> roll (\d -> roll (\e -> f a b c d e)))))
 
-opponentAttacks : GameState -> GameState
+opponentAttacks : Transition
 opponentAttacks s = case s.action of
   FIGHTING m -> s |> roll5 (\monsterScrappiness monsterFocus monsterMuscleMemory monsterThirst monsterVileness -> let
     hitRoll = floor (monsterScrappiness * 20) + m.level - itemBonus "ARMOR" s - itemBonus "SHIELD" s + m.hitBonus
@@ -487,14 +446,14 @@ opponentAttacks s = case s.action of
   if hitRoll < 10 then prompt "IT MISSED..." `andThen` after 15 (clearPrompt `andThen` prompt "`F`IGHT, `C`AST, OR `E`VADE:")
   else let
     damageRoll = floor ((monsterFocus * 8 + monsterMuscleMemory * toFloat m.level * 2 + 1) * toFloat m.damageMultiplier)
-    drain = chance m.drainChance monsterThirst
-    paralyze = chance m.paralyzeChance monsterVileness
+    drain = monsterThirst < m.drainChance
+    paralyze = monsterVileness < m.paralyzeChance
   in
     prompt ("IT DOES " ++ show damageRoll ++ " POINTS DAMAGE")
     `andThen` takeDamage damageRoll (after 15 (clearPrompt `andThen` prompt "`F`IGHT, `C`AST, OR `E`VADE:")))
   _ -> s
 
-damageOpponent : Int -> GameState -> GameState
+damageOpponent : Int -> Transition
 damageOpponent d s = case s.action of
   FIGHTING m -> let
     mh = m.hp - d
@@ -503,13 +462,14 @@ damageOpponent d s = case s.action of
   in
     if mh <= 0 then
       s2 |> prompt "IT DIED..."
-         |> gainExp exp
+         |> gainExp exp |> prompt ("YOU GAIN " ++ show exp ++ " EXPERIENCE POINTS")
+         |> checkForLevelChange
          |> after 20 (clearPrompt `andThen` checkForLoot m.level)
     else
       s2 |> opponentAttacks
   _ -> s
 
-fight : GameState -> GameState
+fight : Transition
 fight s = case s.action of
   FIGHTING m -> s |> clearPrompt |> roll5 (\scrappiness focus muscleMemory _ _ -> let
     hitRoll = floor (scrappiness * 20) + s.level + itemBonus "SWORD" s + s.stats.str `div` 2 +
@@ -525,38 +485,38 @@ fight s = case s.action of
         damageOpponent damageRoll)
   _ -> s
 
-promptSameLine : String -> GameState -> GameState
+promptSameLine : String -> Transition
 promptSameLine m s = let r = reverse s.prompt in {s | prompt <- case r of
   [] -> [m]
   x :: xs -> reverse ((x ++ m) :: xs)}
 
-addGold : Int -> GameState -> GameState
+addGold : Int -> Transition
 addGold n s = {s | gold <- s.gold + n}
 
-lootTreasure : Treasure -> Bool -> GameState -> GameState
+lootTreasure : Treasure -> Bool -> Transition
 lootTreasure t trapped s = s |> promptSameLine "SNARF IT"
   |> roll (\r -> let damageRoll = dn (3 * t.level) r in prompt "IT'S TRAPPED!"
     `andThen` prompt ("YOU SUFFER " ++ show damageRoll ++ " POINTS DAMAGE")
     `andThen` takeDamage damageRoll id) `when` trapped
   |> roll (\r -> let goldRoll = dn (t.value * t.level * 200) r in
      prompt ("IT'S WORTH " ++ show goldRoll ++ " GOLD") `andThen` addGold goldRoll)
-  |> roll (\r -> if t.value == 0 && chance 0.2 r then
+  |> roll (\r -> if t.value == 0 && r < 0.2 then
      after 20 (clearPrompt `andThen` checkForItem t.level trapped)
      else after 20 checkForTraps)
 
-lootChest : Int -> Bool -> GameState -> GameState
+lootChest : Int -> Bool -> Transition
 lootChest lvl trapped s = s |> promptSameLine "OPEN IT"
   |> roll (\r -> let damageRoll = dn (10 * s.pos.z) r in
      prompt "CHEST EXPLODES!!!!!" `andThen` prompt ("YOU SUFFER " ++ show damageRoll ++ " POINTS DAMAGE")
      `andThen` takeDamage damageRoll id) `when` trapped
-  |> roll (\r1 -> if chance 0.1 r1 then
+  |> roll (\r1 -> if r1 < 0.1 then
        prompt "INSIDE, THERE ARE ONLY COBWEBS..." `andThen` after 20 checkForTraps
      else roll (\r2 -> let goldRoll = dn (1000 * lvl^2) r2 in prompt ("INSIDE ARE " ++ show goldRoll ++ " GOLD PIECES!")
-       `andThen` addGold goldRoll `andThen` roll (\r3 -> if chance 0.5 r3 then
+       `andThen` addGold goldRoll `andThen` roll (\r3 -> if r3 < 0.5 then
           after 20 (clearPrompt `andThen` checkForItem lvl False)
           else after 20 checkForTraps)))
 
-takeItem : Item -> GameState -> GameState
+takeItem : Item -> Transition
 takeItem i s = {s | items <- map (\x -> if x.name == i.name then
     if x.isConsumable then {x | bonus <- x.bonus + 1}
     else {x | bonus <- i.bonus}
@@ -566,37 +526,82 @@ takeItem i s = {s | items <- map (\x -> if x.name == i.name then
 -- the item level.  I suspect in the original code the "I" for the item index (which is always SWORD = 1)
 -- should be a "L" for level, but I'm leaving it the same.
 
-lootItem : Item -> Int -> Bool -> GameState -> GameState
+lootItem : Item -> Int -> Bool -> Transition
 lootItem i lvl trapped = if trapped && i.name == "SWORD" then
     roll (\r -> let damageRoll = dn 5 r in
       prompt "IT'S A HOSTILE SWORD!!" `andThen` prompt ("YOU SUFFER " ++ show damageRoll ++ " DAMAGE POINTS")
       `andThen` takeDamage damageRoll (after 20 checkForTraps))
   else
     promptSameLine "IT'S YOURS!" `andThen` takeItem i `andThen` after 20
-      (roll (\r -> if chance 0.5 r then clearPrompt `andThen` checkForItem lvl False
+      (roll (\r -> if r < 0.5 then clearPrompt `andThen` checkForItem lvl False
         else checkForTraps))
 
-update : Command -> GameState -> GameState
+setGold : Int -> Transition
+setGold n s = {s | gold <- n}
+
+putGoldInSafe : Transition
+putGoldInSafe s = {s | gold <- 0, totalGold <- s.totalGold + s.gold}
+
+gainLevel : Transition
+gainLevel s = let lvl = s.level + 1 in {s | level <- lvl, su <- s.su + lvl, maxsu <- s.maxsu + lvl}
+
+gainHP : Int -> Transition
+gainHP n s = {s | hp <- s.hp + n, maxhp <- s.maxhp + n}
+
+capExp : Transition
+capExp s = let mx = 1000 * 2 ^ s.level in
+  if s.exp >= mx then {s | exp <- mx - 1} else s
+
+checkForLevelChange : Transition
+checkForLevelChange s = s |> if s.exp >= 1000 * 2 ^ s.level then
+    prompt "YOU WENT UP A LEVEL!" `andThen` gainLevel `andThen` capExp `andThen` roll (\r -> let hpRoll = dn s.stats.con r in prompt ("YOU GAIN " ++ show hpRoll ++ " HIT POINTS") `andThen` gainHP hpRoll)
+  else if (s.level > 1 && s.exp < 1000 * 2 ^ (s.level - 1)) || s.exp < 0 then
+    prompt "YOU GO DOWN A LEVEL!"
+  else id
+
+clearSpellEffects : Transition
+clearSpellEffects s = {s | effects <- map (\ef -> {ef | duration <- 0}) s.effects}
+
+fullRecharge : Transition
+fullRecharge s = {s | su <- s.maxsu}
+
+rest : Transition
+rest s = s |> clearPrompt `andThen` setAction RESTING
+  `andThen` gainExp s.gold `andThen` putGoldInSafe
+  `andThen` prompt ("YOU HAVE FOUND THE " ++ innName s.pos)
+  `andThen` prompt "THEY CASH IN YOUR GOLD"
+  `andThen` prompt ("YOU HAVE " ++ show s.totalGold ++ " IN THE SAFE")
+  `andThen` checkForLevelChange `andThen` fullHeal
+  `andThen` clearSpellEffects `andThen` fullRecharge
+  `andThen` prompt "YOU SPEND THE NIGHT"
+  `andThen` after 20 (clearPrompt `andThen` prompt "YOU FEEL BETTER"
+    `andThen` prompt "PRESS <RET> TO RETURN TO THE DUNGEON")
+
+update : Command -> Transition
 update c s = case c of
-  ERROR  -> wtf s
+  ERROR  -> case s.action of
+    LOOTING_FREE _ _ -> s |> promptSameLine "LEAVE IT" |> after 20 checkForTraps
+    LOOTING_CHEST _ _ -> s |> promptSameLine "LEAVE IT" |> after 20 checkForTraps
+    LOOTING_ITEM _ lvl _ -> s |> promptSameLine "LEAVE IT" |> after 20 (roll (\r -> if r < 0.5 then clearPrompt `andThen` checkForItem lvl False else checkForTraps))
+    _ -> wtf s
   NORTH  -> if canMoveNorth s && isNotDelayed s
-            then travel northOf s |> withMessage "North" |> successfully
+            then travel Dungeon.northOf s |> withMessage "North" |> successfully
             else wtf s
   EAST   -> if canMoveEast s && isNotDelayed s
-            then travel eastOf s |> withMessage "East" |> successfully
+            then travel Dungeon.eastOf s |> withMessage "East" |> successfully
             else wtf s
   SOUTH  -> if canMoveSouth s && isNotDelayed s
-            then travel southOf s |> withMessage "South" |> successfully
+            then travel Dungeon.southOf s |> withMessage "South" |> successfully
             else wtf s
   WEST   -> if canMoveWest s && isNotDelayed s
-            then travel westOf s |> withMessage "West" |> successfully
+            then travel Dungeon.westOf s |> withMessage "West" |> successfully
             else wtf s
   UP     -> if canMoveUp s && isNotDelayed s
-            then travel topOf s |> (if s.pos.z == 1 then fullHeal `andThen` setAction RESTING
+            then travel Dungeon.topOf s |> (if s.pos.z == 1 then fullHeal `andThen` rest
               else successfully . withMessage "Up")
             else wtf s
   DOWN   -> if canMoveDown s && isNotDelayed s
-            then travel bottomOf s |> withMessage "Down" |> successfully
+            then travel Dungeon.bottomOf s |> withMessage "Down" |> successfully
             else wtf s
   STAY   -> if s.action == WAITING && isNotDelayed s
             then s |> withMessage "Stay" |> successfully
@@ -608,7 +613,7 @@ update c s = case c of
             then increaseDuration "Astral Walk" 10 s |> withMessage "Cast" |> resetIdleTimer
             else wtf s
   CONTINUE -> case s.action of
-    RESTING -> s |> travel bottomOf |> setAction WAITING |> successfully
+    RESTING -> s |> travel Dungeon.bottomOf |> setAction WAITING |> successfully
     LOOTING_FREE t trapped -> s |> lootTreasure t trapped
     LOOTING_CHEST lvl trapped -> s |> lootChest lvl trapped
     LOOTING_ITEM i lvl trapped -> s |> lootItem i lvl trapped
@@ -618,299 +623,53 @@ update c s = case c of
 stateSignal : Signal GameState
 stateSignal = foldp update initState commandStream
 
--- Concrete Model: A procedurally generated map
-
-decodeBoundary : Int -> Boundary
-decodeBoundary x = let n = x `mod` 4 in
-  if | n == 2 -> DOOR
-     | n == 3 -> WALL
-     | otherwise -> EMPTY
-
-decodeFeature : Int -> Feature
-decodeFeature n = case n of
-  0 -> NONE
-  1 -> ELEVATOR
-  2 -> PIT
-  3 -> TELEPORTER
-  4 -> STAIRS_DOWN
-  5 -> ALTAR
-  6 -> FOUNTAIN
-  7 -> CUBE
-  8 -> THRONE
-  9 -> BOX
-
-  10 -> ELEVATOR
-  11 -> PIT
-  12 -> TELEPORTER
-  13 -> STAIRS_DOWN
-  14 -> ALTAR
-  15 -> FOUNTAIN
-
-emptyRoom = {top = EMPTY, left = EMPTY, feature = NONE}
-
-onSoutheastCorner : Position -> Bool
-onSoutheastCorner {x, y, z} = x == 201 && y == 201
-
-inBounds : Position -> Bool
-inBounds {x, y, z} = x >= 1 && x <= eastEdge &&
-  y >= 1 && y <= southEdge && z >= 1 && z <= dungeonDepth
-
-xo = 1.6915
-yo = 1.4278
-zo = 1.2462
-
-frac : Float -> Float
-frac r = r - toFloat (floor r)
-
-rawRoomAt : Position -> Room
-rawRoomAt p = if not (inBounds p) || onSoutheastCorner p then emptyRoom else
-  if p.x == eastEdge then {emptyRoom | left <- WALL} else
-  if p.y == southEdge then {emptyRoom | top <- WALL} else
-  let
-    fx = toFloat p.x
-    fy = toFloat p.y
-    fz = toFloat p.z
-    q = fx * xo + fy * yo + fz * zo + (fx + xo) * (fy + yo) * (fz + zo)
-    h = floor (frac q * 4694)
-    hi = h `div` 256
-    ft = if hi == 0 || hi > 5 then 0 else floor (frac (10 * q) * 15) + 1
-  in
-    {top = if p.y == 1 then WALL else decodeBoundary h,
-     left = if p.x == 1 then WALL else decodeBoundary (h `div` 4),
-     feature = decodeFeature ft}
-
-mapFeature : Feature -> Feature -> Room -> Room
-mapFeature a b r = if r.feature == a then {r | feature <- b} else r
-
-mergeFeature : Feature -> Room -> Room
-mergeFeature f r = case f of
-  STAIRS_DOWN -> case r.feature of
-    STAIRS_DOWN -> {r | feature <- STAIRS_BOTH}
-    _ -> {r | feature <- STAIRS_UP}
-  _ -> r
-
-roomAt : Position -> Room
-roomAt p = let m = mergeFeature (rawRoomAt {p | z <- p.z - 1}).feature (rawRoomAt p) in 
-  if | p.z == 1 -> mapFeature ELEVATOR STAIRS_UP m
-     | p.z == dungeonDepth -> (mapFeature PIT ELEVATOR . mapFeature STAIRS_DOWN NONE .
-        mapFeature STAIRS_BOTH STAIRS_UP) m
-     | otherwise -> m
-
 -- View: Show the map in the neighborhood of the player
 
-zoom = 3
+hero = Graphics.spriteForm "hero.png" |> Graphics.movePixels (9, -5)
 
-spriteForm : String -> Form
-spriteForm s = fittedImage (24 * zoom) (21 * zoom) s |> toForm
+fallingHero n = croppedImage (0, 0) (24 * Graphics.pixels) (n * Graphics.pixels) "hero.png"
+  |> toForm |> move (9 * Graphics.pixels, -5 * Graphics.pixels)
 
-wideSpriteForm : String -> Form
-wideSpriteForm s = fittedImage (48 * zoom) (21 * zoom) s |> toForm
+refuse = Graphics.wideSpriteForm "refuse.png" |> Graphics.movePixels (9, 12)
+silver = Graphics.wideSpriteForm "silver.png" |> Graphics.movePixels (9, 12)
+gold   = Graphics.wideSpriteForm "gold.png"   |> Graphics.movePixels (9, 12)
 
-charForm : String -> Form
-charForm s = fittedImage (8 * zoom) (8 * zoom) s |> toForm
+gems   = Graphics.spriteForm "gems.png"       |> Graphics.movePixels (9, 12)
+chest  = Graphics.spriteForm "chest.png"      |> Graphics.movePixels (9, 12)
 
-hero = spriteForm "hero.png" |> move (9 * zoom, -5 * zoom)
-
-fallingHero n = croppedImage (0, 0) (24 * zoom) (n * zoom) "hero.png"
-  |> toForm |> move (9 * zoom, -5 * zoom)
-
-stairsUp = spriteForm "stairsUpb.png" |> move (-2 * zoom, 21 * zoom)
-stairsDown = spriteForm "stairsDownb.png" |> move (-2 * zoom, 21 * zoom)
-stairsBoth = spriteForm "stairsBothb.png" |> move (-2 * zoom, 21 * zoom)
-pit = spriteForm "pitb.png" |> move (8 * zoom, -10 * zoom)
-elevator = spriteForm "elevatorb.png" |> move (3 * zoom, -5 * zoom)
-teleporter = spriteForm "teleportb.png" |> move (-8 * zoom, 8 * zoom)
-altar = spriteForm "altarb.png" |> move (-12 * zoom, 16 * zoom)
-fountain = spriteForm "fountainb.png" |> move (-12 * zoom, 16 * zoom)
-cube = charForm "cubeb.png" |> move (-9 * zoom, 10 * zoom)
-throne = spriteForm "throneb.png" |> move (-8 * zoom, 16 * zoom)
-box = charForm "boxb.png" |> move (-9 * zoom, 9 * zoom)
-
-refuse = wideSpriteForm "refuse.png" |> move (9 * zoom, 12 * zoom)
-silver = wideSpriteForm "silver.png" |> move (9 * zoom, 12 * zoom)
-gold = wideSpriteForm "gold.png" |> move (9 * zoom, 12 * zoom)
-gems = spriteForm "gems.png" |> move (9 * zoom, 12 * zoom)
-chest = spriteForm "chest.png" |> move (9 * zoom, 12 * zoom)
-
-gnoll = kobold
-kobold = spriteForm "kobold.png" |> move (-8 * zoom, 8 * zoom)
+gnoll    = kobold
+kobold   = Graphics.spriteForm "kobold.png"   |> Graphics.movePixels (-8, 8)
 skeleton = ghoul
-hobbit = dwarf
-zombie = ghoul
-orc = kobold
-fighter = dwarf
-mummy = ghoul
-elf = dwarf
-troll = spriteForm "troll.png" |> move (-8 * zoom, 8 * zoom)
-wraith = ghoul
-ogre = spriteForm "ogre.png" |> move (-8 * zoom, 8 * zoom)
+hobbit   = dwarf
+zombie   = ghoul
+orc      = kobold
+fighter  = dwarf
+mummy    = ghoul
+elf      = dwarf
+troll    = Graphics.spriteForm "troll.png"    |> Graphics.movePixels (-8, 8)
+wraith   = ghoul
+ogre     = Graphics.spriteForm "ogre.png"     |> Graphics.movePixels (-8, 8)
 minotaur = dwarf
-giant = ogre
-specter = ghoul
-vampire = ghoul
-demon = ghoul
-dragon = ghoul
-dwarf = spriteForm "dwarf.png" |> move (-8 * zoom, 8 * zoom)
-ghoul = spriteForm "ghoul.png" |> move (-10 * zoom, 10 * zoom)
+giant    = ogre
+specter  = ghoul
+vampire  = ghoul
+demon    = ghoul
+dragon   = ghoul
+dwarf    = Graphics.spriteForm "dwarf.png"    |> Graphics.movePixels (-8, 8)
+ghoul    = Graphics.spriteForm "ghoul.png"    |> Graphics.movePixels (-10, 10)
 
-featureSymbol : Feature -> [Form]
-featureSymbol f = case f of
-  NONE -> []
-  STAIRS_UP -> [stairsUp]
-  STAIRS_BOTH -> [stairsBoth]
-  STAIRS_DOWN -> [stairsDown]
-  ELEVATOR -> [elevator]
-  PIT -> [pit]
-  TELEPORTER -> [teleporter]
-  STAIRS_DOWN -> [stairsDown]
-  ALTAR -> [altar]
-  FOUNTAIN -> [fountain]
-  CUBE -> [cube]
-  THRONE -> [throne]
-  BOX -> [box]
-
-wallLen = 56 * zoom
-wallWidth = 8 * zoom
-roomWidth = wallLen - wallWidth
-halfWidth = toFloat (roomWidth `div` 2)
-
-hdoor = fittedImage wallLen wallWidth "hdoorb.png" |> toForm
-hwall = fittedImage wallLen wallWidth "hwallb.png" |> toForm
-vdoor = fittedImage wallWidth wallLen "vdoorb.png" |> toForm
-vwall = fittedImage wallWidth wallLen "vwallb.png" |> toForm
-
-drawRoom : Room -> [Form]
-drawRoom r =
-  (case r.top of
-    EMPTY -> []
-    DOOR -> [hdoor |> moveY halfWidth]
-    WALL -> [hwall |> moveY halfWidth])
-  ++ (case r.left of
-    EMPTY -> []
-    DOOR -> [vdoor |> moveX -halfWidth]
-    WALL -> [vwall |> moveX -halfWidth])
-  ++ featureSymbol r.feature
-
-offset : (Int, Int) -> Position -> Position
-offset (dx, dy) p = {p | x <- p.x + dx, y <- p.y + dy}
-
-drawRoomAt : Position -> (Int, Int) -> [Form]
-drawRoomAt p (dx, dy) = 
-  (drawRoom (roomAt (offset (dx, dy) p)) |>
-  map (move (roomWidth * toFloat dx, -roomWidth * toFloat dy)))
-
-offsets = [-1 .. 2]
-
-allOffsets : [(Int, Int)]
-allOffsets = concatMap (\y -> map (\ x -> (x, y)) offsets) offsets
-
-type Neighborhood = Dict (Int, Int) Room
-
-neighborhood : Position -> Neighborhood
-neighborhood p = Dict.fromList (map (\o -> (o, roomAt (offset o p))) allOffsets)
-
-nget : (Int, Int) -> Neighborhood -> Room
-nget = Dict.findWithDefault emptyRoom
-
-drawTop : Room -> [Form]
-drawTop r = case r.top of
-  EMPTY -> []
-  DOOR  -> [hdoor |> moveY halfWidth]
-  WALL  -> [hwall |> moveY halfWidth]
-
-drawLeft : Room -> [Form]
-drawLeft r = case r.left of
-  EMPTY -> []
-  DOOR  -> [vdoor |> moveX -halfWidth]
-  WALL  -> [vwall |> moveX -halfWidth]
-
-drawTopX : Room -> [Form]
-drawTopX r = case r.top of
-  EMPTY -> []
-  DOOR  -> [cube |> moveY halfWidth]
-  WALL  -> [cube |> moveY halfWidth]
-
-drawLeftX : Room -> [Form]
-drawLeftX r = case r.left of
-  EMPTY -> []
-  DOOR  -> [cube |> moveX -halfWidth]
-  WALL  -> [cube |> moveX -halfWidth]
-
-shift : (Int, Int) -> [Form] -> [Form]
-shift (dx, dy) = map (move (roomWidth * toFloat dx, -roomWidth * toFloat dy))
-
-drawNorthQuad : Neighborhood -> [Form]
-drawNorthQuad ns = let
-    rc = ns |> nget (0, 0)
-    rnw = ns |> nget (-1, -1)
-    rn = ns |> nget (0, -1)
-    rne = ns |> nget (1, -1)
-  in
-    if rc.top /= EMPTY then drawTop rc
-    else (drawTop rn |> shift (0, -1)) ++
-      (if rn.left /= EMPTY then drawLeft rn |> shift (0, -1)
-        else drawTop rnw |> shift (-1, -1))
-      ++ if rne.left /= EMPTY then drawLeft rne |> shift (1, -1)
-        else drawTop rne |> shift (1, -1)
-
-drawWestQuad : Neighborhood -> [Form]
-drawWestQuad ns = let
-    rc = ns |> nget (0, 0)
-    rnw = ns |> nget (-1, -1)
-    rw = ns |> nget (-1, 0)
-    rsw = ns |> nget (-1, 1)
-  in
-    if rc.left /= EMPTY then drawLeft rc
-    else (drawLeft rw |> shift (-1, 0)) ++
-      (if rw.top /= EMPTY then drawTop rw |> shift (-1, 0)
-        else drawLeft rnw |> shift (-1, -1))
-      ++ if rsw.top /= EMPTY then drawTop rsw |> shift (-1, 1)
-        else drawLeft rsw |> shift (-1, 1)
-
-drawSouthQuad : Neighborhood -> [Form]
-drawSouthQuad ns = let
-    rs = ns |> nget (0, 1)
-    rse = ns |> nget (1, 1)
-    rssw = ns |> nget (-1, 2)
-    rss = ns |> nget (0, 2)
-    rsse = ns |> nget (1, 2)
-  in
-    if rs.top /= EMPTY then drawTop rs |> shift (0, 1)
-    else (drawTop rss |> shift (0, 2)) ++
-      (if rs.left /= EMPTY then drawLeft rs |> shift (0, 1)
-        else drawTop rssw |> shift (-1, 2))
-      ++ if rse.left /= EMPTY then drawLeft rse |> shift (1, 1)
-        else drawTop rsse |> shift (1, 2)
-
-drawEastQuad : Neighborhood -> [Form]
-drawEastQuad ns = let
-    re = ns |> nget (1, 0)
-    rse = ns |> nget (1, 1)
-    rnee = ns |> nget (2, -1)
-    ree = ns |> nget (2, 0)
-    rsee = ns |> nget (2, 1)
-  in
-    if re.left /= EMPTY then drawLeft re |> shift (1, 0)
-    else (drawLeft ree |> shift (2, 0)) ++
-      (if re.top /= EMPTY then drawTop re |> shift (1, 0)
-        else drawLeft rnee |> shift (2, -1))
-      ++ if rse.top /= EMPTY then drawTop rse |> shift (1, 1)
-        else drawLeft rsee |> shift (2, 1)
-
-drawNeighborhood : Position -> [Form]
-drawNeighborhood p = let ns = neighborhood p in
-  drawNorthQuad ns ++ drawWestQuad ns ++ drawSouthQuad ns ++ drawEastQuad ns
+elevator = Graphics.spriteForm "elevatorb.png"   |> Graphics.movePixels (  3,  -5)
 
 drawAction : GameState -> [Form]
 drawAction s = case s.action of
-  FALLING n -> [fallingHero n |> moveY (toFloat (zoom * (n - 21)) / 2)]
-  RISING n -> [elevator |> moveY (toFloat (zoom * (21 - n))),
-    hero |> moveY (toFloat (zoom * (21 - n)))]
+  FALLING n -> [fallingHero n |> moveY (toFloat ((n - 21) * Graphics.pixels) / 2)]
+  RISING n -> [elevator |> moveY (toFloat ((21 - n) * Graphics.pixels)),
+    hero |> moveY (toFloat ((21 - n) * Graphics.pixels))]
   TELEPORTING n -> [hero, rect 800 600 |> filled (rgba 0 0 0 ((21 - abs (toFloat n)) / 21))]
   FIGHTING m -> [m.img, hero]
   LOOTING_FREE t _ -> [t.img, hero]
   LOOTING_CHEST _ _ -> [chest, hero]
-  _ -> (roomAt s.pos |> .feature |> featureSymbol) ++ [hero]
+  _ -> Dungeon.featureSymbolAt s.pos ++ [hero]
 
 adjectives = ["SALTY", "BOLD", "LOUD", "OLD", "GOODLY", "WORTHY", "LOFTY", "FINE", "ROCKY", "AGED"]
 
@@ -924,23 +683,17 @@ nth n s = drop n s |> head
 lowDigit : Int -> Int
 lowDigit n = n - (n `div` 10) * 10
 
-innName : Position -> String
+innName : Dungeon.Position -> String
 innName p = (adjectives |> nth (lowDigit (p.x * p.y))) ++ " " ++
   (nouns |> nth (lowDigit (p.x + p.y))) ++ " " ++
   (establishments |> nth (lowDigit (p.x * 3 + p.y * 7)))
 
-innDesc : Position -> [String]
-innDesc p = ["YOU HAVE FOUND THE " ++ innName p,
-  "YOU SPEND THE NIGHT",
-  "YOU FEEL BETTER",
-  "PRESS <RET> TO RETURN TO THE DUNGEON"]
-
 drawInn : GameState -> [Form]
-drawInn s = [c64s (innDesc s.pos) |> move (-12 * 24 + 12, -10 * 24), hero]
+drawInn s = [hero]
 
 drawGameState : GameState -> [Form]
 drawGameState s = if s.pos.z == 0 then drawInn s
-  else drawNeighborhood s.pos ++ drawAction s
+  else Dungeon.drawNeighborhood s.pos ++ drawAction s
 
 textify : String -> Element
 textify s = toText ("   " ++ s) |> centered
@@ -950,88 +703,8 @@ spellEffectsStr s = map (\sf -> if sf.duration > 0 then sf.abbr ++ " " else "") 
 
 monsterStatus : GameState -> Form
 monsterStatus s = case s.action of
-  FIGHTING m -> c64 ("`LVL " ++ show m.level ++ " " ++ m.name) |> move (4 * 24, -5 * 24)
+  FIGHTING m -> C64.printLines ["`LVL " ++ show m.level ++ " " ++ m.name] |> C64.at (23, 19)
   _ -> empty |> toForm
-
-charAt : (Int, Int) -> Element
-charAt (x, y) = croppedImage (x * 24, y * 24) 24 24 "charset.png"
-
-c64Char : Int -> Char -> Element
-c64Char off c = case c of
-  '@' -> charAt (0, off)
-  'A' -> charAt (1, off)
-  'B' -> charAt (2, off)
-  'C' -> charAt (3, off)
-  'D' -> charAt (4, off)
-  'E' -> charAt (5, off)
-  'F' -> charAt (6, off)
-  'G' -> charAt (7, off)
-  'H' -> charAt (8, off)
-  'I' -> charAt (9, off)
-  'J' -> charAt (10, off)
-  'K' -> charAt (11, off)
-  'L' -> charAt (12, off)
-  'M' -> charAt (13, off)
-  'N' -> charAt (14, off)
-  'O' -> charAt (15, off)
-  'P' -> charAt (16, off)
-  'Q' -> charAt (17, off)
-  'R' -> charAt (18, off)
-  'S' -> charAt (19, off)
-  'T' -> charAt (20, off)
-  'U' -> charAt (21, off)
-  'V' -> charAt (22, off)
-  'W' -> charAt (23, off)
-  'X' -> charAt (24, off)
-  'Y' -> charAt (25, off)
-  'Z' -> charAt (26, off)
-  '[' -> charAt (27, off)
-  -- British Pound
-  ']' -> charAt (28, off + 1)
-  -- Up arrow
-  -- Left arrow
-  ' ' -> charAt (0, off + 1)
-  '!' -> charAt (1, off + 1)
-  '"' -> charAt (2, off + 1)
-  '#' -> charAt (3, off + 1)
-  '$' -> charAt (4, off + 1)
-  '%' -> charAt (5, off + 1)
-  '&' -> charAt (6, off + 1)
-  '\'' -> charAt (7, off + 1)
-  '(' -> charAt (8, off + 1)
-  ')' -> charAt (9, off + 1)
-  '*' -> charAt (10, off + 1)
-  '+' -> charAt (11, off + 1)
-  ',' -> charAt (12, off + 1)
-  '-' -> charAt (13, off + 1)
-  '.' -> charAt (14, off + 1)
-  '/' -> charAt (15, off + 1)
-  '0' -> charAt (16, off + 1)
-  '1' -> charAt (17, off + 1)
-  '2' -> charAt (18, off + 1)
-  '3' -> charAt (19, off + 1)
-  '4' -> charAt (20, off + 1)
-  '5' -> charAt (21, off + 1)
-  '6' -> charAt (22, off + 1)
-  '7' -> charAt (23, off + 1)
-  '8' -> charAt (24, off + 1)
-  '9' -> charAt (25, off + 1)
-  ':' -> charAt (26, off + 1)
-  ';' -> charAt (27, off + 1)
-  '<' -> charAt (28, off + 1)
-  '=' -> charAt (29, off + 1)
-  '>' -> charAt (30, off + 1)
-  '?' -> charAt (31, off + 1)
-
-enchi : String -> (Bool, Element)
-enchi s = foldl (\c (h, s) -> if c == '`' then (not h, s)
-  else (h, s `beside` c64Char (if h then 4 else 0) c)) (False, empty) (String.toList s)
-
-c64 : String -> Form
-c64 s = let (_, fs) = enchi s in fs |> toForm |> moveX ((widthOf fs |> toFloat) / 2)
-
-c64s : [String] -> Form
-c64s ss = zip ss [0 .. length ss] |> map (\(s, i) -> c64 s |> moveY (toFloat i * -24)) |> group
 
 bonusStr : Int -> String
 bonusStr n = if n == 0 then "" else "+" ++ show n
@@ -1048,22 +721,22 @@ maybeShowItem q = let n = q.bonus in
 
 charData : GameState -> Form
 charData s = let t = s.stats in
-  c64s ([s.name ++ " LVL " ++ show s.level,
+  C64.printLines ([s.name ++ " LVL " ++ show s.level,
   "STR " ++ show t.str ++ "   CON " ++ show t.con,
   "INT " ++ show t.int ++ "   DEX " ++ show t.dex,
   "WIS " ++ show t.wis ++ "   CHR " ++ show t.chr,
   "HP " ++ show s.hp ++ "/" ++ show s.maxhp,
   "SU " ++ show s.su ++ "/" ++ show s.maxsu,
   "EX " ++ show s.exp,
-  "GD " ++ show s.gold] ++ concatMap maybeShowItem s.items)
+  "GD " ++ show s.gold] ++ concatMap maybeShowItem s.items) |> C64.at (23, 0)
 
 showPrompt : GameState -> Form
-showPrompt s = c64s s.prompt
+showPrompt s = C64.printLines s.prompt |> C64.at (0, 20)
 
 drawView : GameState -> Element
-drawView s = ((collage 960 720 [drawGameState s |> group |> move (-200, 110),
-  charData s |> move (100, 14 * 24),
-  showPrompt s |> move (-19 * 24, -6 * 24),
+drawView s = ((collage 960 600 [drawGameState s |> group |> move (-200, 60),
+  charData s,
+  showPrompt s,
   monsterStatus s] |> color black) `above`
   textify (spellEffectsStr s) `above` textify s.msg)
 
